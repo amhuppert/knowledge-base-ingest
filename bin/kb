@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# kb — launcher for the knowledge-base CLI.
+# Runs the TypeScript entrypoint directly via tsx (no build step needed).
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec "$ROOT/node_modules/.bin/tsx" "$ROOT/src/cli/index.ts" "$@"

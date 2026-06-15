@@ -1,0 +1,19 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Design-process scratch (Codex raw stdout/stderr); the curated design lives in docs/
+.design/*-out.txt
+.design/*-err.txt
+
+# Local scratch knowledge bases used for manual/e2e demos
+/scratch/
+/tmp-kb/
+
+# OS
+.DS_Store
+
+# Browser-tooling scaffolding (from docs visual verification)
+.playwright/
+.playwright-cli/
+.claude/skills/playwright-cli/

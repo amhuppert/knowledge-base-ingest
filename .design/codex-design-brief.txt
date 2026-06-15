@@ -1,0 +1,32 @@
+You are an independent senior architect reviewing a greenfield design. Produce a complete, opinionated architecture. Be concrete and specific; prefer decisions over surveys. This is a DESIGN deliverable (no code yet).
+
+# Problem
+Build a system for using an AI coding agent (Claude Code) to CREATE, MAINTAIN, and INGEST INTO a knowledge base from source materials. Local, single-user. TypeScript + Zod + SQLite. CLI tools that AI agents invoke to find/update info efficiently. Delivered partly as Claude Code "skills" (markdown instruction files that guide the agent).
+
+# Hard requirements
+1. Given source materials, the agent creates a set of documents that are the current, complete, up-to-date view of the knowledge base.
+2. Hierarchical summarization & synthesis: a top-level document, broken into a hierarchy of arbitrary depth. Parent documents are the synthesis of all their child documents.
+3. An index document linking all source documents with short descriptions.
+4. Copies of source documents kept in the KB, IMMUTABLE and segregated from anything derived/generated.
+5. Strict PROVENANCE: every part of generated info traces back to a source document.
+6. After initial creation, the system ingests NEW source documents and must update the generated KB docs to incorporate new info (including conflicts/supersession).
+7. During ingestion, extract knowledge-graph items: entities of different types and relationships between them.
+8. Goals: agents can use the KB to answer questions about the subject matter; system maintains human-readable documents.
+9. V1 outcomes: humans get a readable-markdown view of the KB; Claude Code can efficiently and accurately find info and answer questions.
+
+# Optimize for (handle well): technical documentation, software development topics, software engineering principles. Design for greater generality later.
+
+# Rules: prioritize type safety; TDD red/green/refactor.
+
+# Deliverables — be specific:
+A. SOURCE OF TRUTH decision: where does synthesis prose live — markdown files on disk, or SQLite, or hybrid? Justify. How do markdown and SQLite stay in sync, and which wins on conflict? How do you avoid drift?
+B. SQLite SCHEMA: full table list with columns, keys, and indexes. Cover: source registry (immutable, content-hashed), source chunks, synthesis/current-state nodes (the hierarchy), claims/facts, provenance edges, entities, entity types, relationships, FTS. Show the provenance model precisely: what is the atomic unit that carries provenance and how does a synthesis sentence trace to a source span?
+C. HIERARCHICAL SYNTHESIS mechanics: how the tree is stored & represented on disk and in DB; how "parent = synthesis of children" is enforced/checked; how nodes split when too big; how staleness propagates upward after an ingest.
+D. KNOWLEDGE GRAPH schema for the technical/software domain: concrete entity types and relationship types; how entities are resolved/deduplicated across documents; confidence handling.
+E. INGESTION PIPELINE: precise ordered steps from "new source file" to "fully updated KB", what is deterministic CLI work vs what is agent/LLM judgment, how conflicts & supersession are handled, and how re-ingesting the same/updated source is made idempotent.
+F. CLI SURFACE: the exact set of commands an agent would use (names, args, output shape). Distinguish read/query commands from mutation commands. What is structured (JSON) vs human-readable output. How agents do provenance-checked Q&A.
+G. CLAUDE CODE SKILL design: how many skills, what each instructs, and how the skill keeps the agent disciplined about provenance and synthesis updates.
+H. TOP 8 RISKS / FAILURE MODES and concrete mitigations (e.g., provenance rot, synthesis drift, entity-resolution errors, hallucinated claims, unbounded growth, sync divergence between md and sqlite, idempotency, performance at scale).
+I. What you would CUT from V1 to ship something correct and useful, and what you'd defer.
+
+Keep it dense and decisive. This will be cross-checked against another independent design and synthesized.
