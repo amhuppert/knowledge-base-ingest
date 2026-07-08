@@ -8,8 +8,8 @@ description: Create a new kb-ingest knowledge base from a set of source document
 # Create a knowledge base from a corpus
 
 Build a new knowledge base from one or more source documents, with strict provenance and
-a hierarchical synthesis. Uses the `kb` CLI (`./bin/kb` in this repo). **SQLite is the
-source of truth; `kb/` markdown is a read-only render.**
+a hierarchical synthesis. Uses the globally installed `kb` CLI. **SQLite is the source of
+truth; `kb/` markdown is a read-only render.**
 
 Read the **kb-ingest** skill first — creation is "ingest, repeated, plus an initial
 hierarchy design." This skill adds the bootstrap and the top-down structure.
@@ -18,9 +18,11 @@ hierarchy design." This skill adds the bootstrap and the top-down structure.
 
 1. **Initialize** the KB (creates `kb.sqlite`, `sources/`, `kb/`, `AGENTS.md`, `CLAUDE.md`):
    ```
-   kb init <kb-dir> --json
-   export KB_DIR=<kb-dir>
+   export KB_DIR="$(pwd)/<kb-dir>"
+   kb init "$KB_DIR" --json
    ```
+   Keep `KB_DIR` absolute before any `cd`; a bare relative value is resolved from each
+   command's current directory.
 
 2. **Survey the corpus.** Skim the documents (titles, headings) to decide the top-level
    shape: a single `root` node for the KB's scope, then `topic` nodes for major areas,
@@ -41,9 +43,10 @@ hierarchy design." This skill adds the bootstrap and the top-down structure.
 
 5. **Synthesize bottom-up.** Once claims are in, write each node's prose deepest-first:
    leaves from their own claims, then parents synthesizing their children (a parent may
-   cite any claim in its subtree and should summarize + link its children, not restate
-   everything). Use `kb synthesize --file node.json --json`. Every assertion needs an
-   inline `[^<claim_id>]` citation.
+   cite any claim in its subtree and should summarize the child areas without hand-authoring
+   child links). The renderer automatically adds a `## Subtopics` list for parent nodes.
+   Use `kb synthesize --file node.json --json`. Every assertion needs an inline
+   `[^<claim_id>]` citation.
 
 6. **Verify, render, report:**
    ```
@@ -59,5 +62,5 @@ hierarchy design." This skill adds the bootstrap and the top-down structure.
   any quote that is not an exact substring of the immutable source.
 - Prefer fewer, well-scoped nodes over many tiny ones. Split a leaf only when it covers
   several distinct subtopics.
-- The root synthesis is the reader's entry point: make it a crisp overview that links to
-  the topics, each line backed by a citation.
+- The root synthesis is the reader's entry point: make it a crisp overview backed by
+  citations. Do not duplicate the renderer's generated child links.

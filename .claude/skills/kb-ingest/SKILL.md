@@ -7,13 +7,14 @@ description: Ingest a new source document into a kb-ingest knowledge base and up
 
 # Ingest a source into the knowledge base
 
-The knowledge base is managed by the `kb` CLI (run via `./bin/kb` in this repo, or `kb`
-if installed). **SQLite is the source of truth; the markdown under `kb/` is a read-only
-render.** You add knowledge ONLY through `kb` commands — never by editing files under
-`kb/` or `sources/`.
+The knowledge base is managed by the globally installed `kb` CLI. **SQLite is the source of
+truth; the markdown under `kb/` is a read-only render.** You add knowledge ONLY through
+`kb` commands — never by editing files under `kb/` or `sources/`.
 
-Set `KB_DIR=<kb-root>` (the directory containing `kb.sqlite`) or pass `--kb <dir>` to
-each command. All commands accept `--json`; always use `--json` and parse it.
+Set `KB_DIR` to an absolute KB root (the directory containing `kb.sqlite`), for example
+`export KB_DIR="$(pwd)/memory-bank/fedramp"`, or pass `--kb <absolute-dir>` to each
+command. Avoid bare relative `KB_DIR` values because later `cd` commands rebase them.
+All commands accept `--json`; always use `--json` and parse it.
 
 ## Non-negotiables
 - **Every claim must quote the source exactly.** You give the CLI a `chunk_id` + an
@@ -99,14 +100,21 @@ each command. All commands accept `--json`; always use `--json` and parse it.
      ```
      kb claim supersede <old_claim_id> --by <new_claim_id> --json
      ```
-   - If sources genuinely disagree with no clear winner, keep both and lower confidence;
-     they will surface in `kb/open-questions.md`.
+   - If sources genuinely disagree with no clear winner, keep both, lower confidence if
+     appropriate, and mark both unresolved:
+     ```
+     kb claim conflict <claim_id_a> <claim_id_b> --json
+     ```
+   - If the source itself states a gap or unresolved decision, model it as
+     `claim_type: "open_question"`. `open_question` claims and conflicted claims both
+     surface in `kb/open-questions.md`.
 
 7. **Re-synthesize stale nodes bottom-up.** `kb verify --json` lists stale nodes (warning
    `no-stale-nodes`). For each, deepest first, rewrite its prose. Every assertion must
    carry an inline citation `[^<claim_id>]` to a claim owned by that node (a parent may
-   cite any claim in its subtree). The renderer turns these into footnotes — never write
-   footnote definitions yourself.
+   cite any claim in its subtree). The renderer turns citations into footnotes and
+   automatically adds a `## Subtopics` list for parent nodes — never write footnote
+   definitions yourself or duplicate generated child links.
    ```jsonc
    // node.json
    { "node_id": "nod_…", "title": "Algorithm", "summary": "one line",

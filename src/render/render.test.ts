@@ -12,7 +12,7 @@ import { ClaimService } from '../domain/services/claimService.js';
 import { GraphService } from '../domain/services/graphService.js';
 import { NodeService } from '../domain/services/nodeService.js';
 import type { Chunk } from '../domain/schemas/models.js';
-import type { SourceId } from '../domain/ids.js';
+import type { NodeId, SourceId } from '../domain/ids.js';
 import { renderAll, writeRender, checkRender } from './render.js';
 
 const DOC = [
@@ -57,7 +57,7 @@ function chunkContaining(repos: Repositories, sourceId: SourceId, needle: string
 }
 
 /** A fully-seeded KB: source, root+leaf nodes, a quote-verified claim, a synthesized leaf body. */
-function seed(): { ctx: ServiceContext; repos: Repositories; quote: string } {
+function seed(): { ctx: ServiceContext; repos: Repositories; sourceId: SourceId; leafId: NodeId; quote: string } {
   const { ctx, repos } = makeCtx();
   const sourceId = ingestDoc(ctx);
 
@@ -111,7 +111,7 @@ function seed(): { ctx: ServiceContext; repos: Repositories; quote: string } {
     ],
   });
 
-  return { ctx, repos, quote };
+  return { ctx, repos, sourceId, leafId: leaf.id, quote };
 }
 
 describe('renderAll', () => {
@@ -168,12 +168,47 @@ describe('renderAll', () => {
 
     const rels = files.find((f) => f.path === 'kb/graph/relationships.md')!;
     expect(rels.body).toContain('auth service **stores_in** PostgreSQL');
+    expect(rels.body).toContain('sessions stored in pg');
+    expect(rels.body).toContain('“Sessions are stored in PostgreSQL”');
+    expect(rels.body).toContain('(Auth Service, sources/');
   });
 
   it('writes "_No open questions._" when no claim is conflicted', () => {
     const { repos } = seed();
     const oq = renderAll(repos).find((f) => f.path === 'kb/open-questions.md')!;
     expect(oq.body).toContain('_No open questions._');
+  });
+
+  it('renders open_question claims in open-questions.md', () => {
+    const { ctx, repos, sourceId, leafId } = seed();
+    const chunk = chunkContaining(repos, sourceId, 'PostgreSQL');
+    new ClaimService(ctx).apply({
+      source_id: sourceId,
+      claims: [
+        {
+          node_id: leafId,
+          text: 'Should sessions stay in PostgreSQL?',
+          claim_type: 'open_question',
+          confidence: 0.7,
+          spans: [{ chunk_id: chunk.id, quote: 'Sessions are stored in PostgreSQL', role: 'supports', confidence: 0.7 }],
+        },
+      ],
+    });
+
+    const oq = renderAll(repos).find((f) => f.path === 'kb/open-questions.md')!;
+    expect(oq.body).toContain('Should sessions stay in PostgreSQL?');
+    expect(oq.body).toContain('Node: Token Rotation');
+    expect(oq.body).toContain('“Sessions are stored in PostgreSQL”');
+  });
+
+  it('renders conflicted claims in open-questions.md', () => {
+    const { repos, leafId } = seed();
+    const claim = repos.claims.listByNode(leafId)[0]!;
+    repos.claims.setStatus(claim.id, 'conflicted', null, '2026-06-14T00:01:00.000Z');
+
+    const oq = renderAll(repos).find((f) => f.path === 'kb/open-questions.md')!;
+    expect(oq.body).toContain('Refresh tokens rotate on every use.');
+    expect(oq.body).toContain('Status: conflicted');
   });
 });
 

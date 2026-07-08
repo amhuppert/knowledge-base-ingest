@@ -170,15 +170,21 @@ function renderChangelog(repos: Repositories): RenderedFile {
 interface ConflictedRow {
   id: string;
   node_id: string | null;
+  claim_type: string;
+  status: string;
   text: string;
 }
 
-/** kb/open-questions.md — claims with status 'conflicted'. */
+/** kb/open-questions.md — unresolved questions and conflicted claims. */
 function renderOpenQuestions(repos: Repositories): RenderedFile {
   // No repo method for status filtering; read via the shared connection. Stable
   // order by (created_at, id) mirrors the other claim queries.
   const rows = repos.db
-    .prepare("SELECT id, node_id, text FROM claims WHERE status = 'conflicted' ORDER BY created_at, id")
+    .prepare(
+      `SELECT id, node_id, claim_type, status, text FROM claims
+       WHERE status = 'conflicted' OR claim_type = 'open_question'
+       ORDER BY created_at, id`,
+    )
     .all()
     .map((r) => r as ConflictedRow);
 
@@ -191,13 +197,15 @@ function renderOpenQuestions(repos: Repositories): RenderedFile {
   for (const row of rows) {
     const claimId = makeClaimId(row.id);
     lines.push(`- ${row.text}`);
+    lines.push(`  - Type: ${row.claim_type}`);
+    lines.push(`  - Status: ${row.status}`);
     if (row.node_id !== null) {
       const node = repos.nodes.getById(row.node_id as NodeId);
       if (node) lines.push(`  - Node: ${node.title}`);
     }
     for (const span of repos.claimSpans.spansForClaim(claimId)) {
       const source = repos.sources.getById(span.sourceId);
-      const where = source ? ` (${source.title})` : '';
+      const where = source ? ` (${source.title}, ${source.storedPath})` : '';
       lines.push(`  - “${span.quote}”${where}`);
     }
   }
@@ -243,6 +251,11 @@ function renderRelationships(repos: Repositories): RenderedFile {
     const objName = object ? object.canonicalName : r.objectEntityId;
     const desc = r.description.length > 0 ? ` — ${r.description}` : '';
     lines.push(`- ${subjName} **${r.type}** ${objName}${desc}`);
+    for (const span of repos.relationshipSpans.spansForRelationship(r.id)) {
+      const source = repos.sources.getById(span.sourceId);
+      const where = source ? ` (${source.title}, ${source.storedPath})` : '';
+      lines.push(`  - “${span.quote}”${where}`);
+    }
   }
 
   return makeFile('kb/graph/relationships.md', lines.join('\n') + '\n');

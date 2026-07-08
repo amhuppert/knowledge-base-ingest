@@ -3,4 +3,9 @@
 # Runs the TypeScript entrypoint directly via tsx (no build step needed).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-exec "$ROOT/node_modules/.bin/tsx" "$ROOT/src/cli/index.ts" "$@"
+LOCAL_TSX="$ROOT/node_modules/.bin/tsx"
+if [[ -x "$LOCAL_TSX" ]]; then
+  exec "$LOCAL_TSX" "$ROOT/src/cli/index.ts" "$@"
+fi
+TSX="$(pnpm --dir "$ROOT" exec which tsx)"
+exec "$TSX" "$ROOT/src/cli/index.ts" "$@"

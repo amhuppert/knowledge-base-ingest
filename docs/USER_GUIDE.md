@@ -47,15 +47,19 @@ commands, which validate everything (especially that quotes are real) before sav
 
 ```bash
 pnpm install          # builds the native better-sqlite3 module
-pnpm test             # optional: 94 tests should pass
+pnpm test             # optional: 98 tests should pass
 ```
 
 The CLI runs without a build step via `./bin/kb` (it uses `tsx`). Point it at a knowledge base
 in one of three ways (checked in this order):
 
 1. `--kb <dir>` on any command
-2. `export KB_DIR=<dir>`
+2. `export KB_DIR=<absolute-dir>`
 3. the nearest `kb.sqlite` in or above the current directory
+
+Prefer an absolute `KB_DIR`. A relative value is resolved from each command's current
+directory, so a later `cd` can accidentally turn `memory-bank/fedramp` into a doubled path
+such as `memory-bank/fedramp/memory-bank/fedramp`.
 
 A knowledge base is just a directory:
 
@@ -90,7 +94,7 @@ driving the system yourself.
 ## 5. Quick start (manual walkthrough)
 
 ```bash
-export KB_DIR=./my-kb
+export KB_DIR="$(pwd)/my-kb"
 
 # 1. Create the knowledge base
 ./bin/kb init "$KB_DIR" --json
@@ -157,6 +161,7 @@ Every command accepts `--json` (machine output) and `--kb <dir>`. Output envelop
 | Command | Purpose |
 |---|---|
 | `kb claim apply --file <json>` | Persist claims with quote-verified provenance (atomic). |
+| `kb claim conflict <claim_id> [<claim_id> ...]` | Mark unresolved claims conflicted; marks owning nodes stale and surfaces them in `open-questions.md`. |
 | `kb claim supersede <old_claim_id> --by <new_claim_id>` | Mark a claim superseded; marks affected nodes stale. |
 | `kb graph apply --file <json>` | Persist entities + relationships with provenance (atomic). |
 
@@ -271,8 +276,14 @@ kb render --json
 
 ### Resolve a conflict
 If two sources disagree and neither clearly wins, keep both claims and present the conflict in
-the node's prose ("Sources disagree: …" citing both). They surface in `kb/open-questions.md`.
+the node's prose ("Sources disagree: …" citing both). Mark the unresolved claims so they
+surface in `kb/open-questions.md`:
+```bash
+kb claim conflict clm_A clm_B --json
+```
 If one supersedes the other, use `claim supersede`.
+If the source states a gap or unresolved decision directly, model that as
+`claim_type: "open_question"`; those claims also surface in `open-questions.md`.
 
 ### Answer a question with provenance
 ```bash
@@ -297,8 +308,9 @@ The `kb/` directory is your human-readable view (regenerate with `kb render`):
   footnote with the exact source quote and the path to the source. Parents link their
   subtopics.
 - **`changelog.md`** — what changed and when.
-- **`open-questions.md`** — unresolved conflicts and gaps.
-- **`graph/entities.md`, `graph/relationships.md`** — the knowledge graph.
+- **`open-questions.md`** — unresolved conflicts and `open_question` claims.
+- **`graph/entities.md`, `graph/relationships.md`** — the knowledge graph; relationship
+  rows include their source quotes when evidence was supplied.
 
 A footnote looks like:
 ```
@@ -314,7 +326,8 @@ that justifies it.
 An answer is trustworthy when `kb answer-check` returns `ok:true` **and** the cited quotes (in
 the `ask-context` provenance or `kb provenance <claim_id>`) actually say what the sentence
 claims. `answer-check` guarantees the *structure* — every assertion cites an active,
-source-backed claim — but it cannot judge meaning, so read the quotes for anything important.
+or conflicted source-backed claim — but it cannot judge meaning, so read the quotes for
+anything important.
 If `ask-context` returns nothing relevant, the KB doesn't cover the question; a good agent says
 so rather than guessing.
 
@@ -329,7 +342,8 @@ so rather than guessing.
 - **warnings** (maintenance): `leaf-has-citation`, `no-stale-nodes`.
 
 A green `verify --strict` means: every active claim is backed by a quote that still matches its
-source, every synthesized citation resolves to an in-scope active claim, and nothing is stale.
+source, every synthesized citation resolves to an in-scope claim that is not superseded or
+retracted, and nothing is stale.
 
 ---
 
@@ -344,7 +358,7 @@ source, every synthesized citation resolves to an in-scope active claim, and not
 | `verify` warns `no-stale-nodes` | Nodes need re-synthesis after an ingest/supersede. Re-run `kb synthesize` on each, deepest first (`node tree` shows the tree; stale nodes are flagged). |
 | `render --check` reports `drifted` | Someone edited generated markdown, or content changed. Re-run `kb render` (the DB is the truth; edits to `kb/*.md` are discarded). |
 | `V1 ingests UTF-8 text sources …` | The file is binary/PDF. Extract its text first and ingest that (`.md`/`.txt`). |
-| `No knowledge base at … (missing kb.sqlite)` | Wrong `--kb`/`KB_DIR`, or you haven't run `kb init`. |
+| `No knowledge base at … (missing kb.sqlite)` | Wrong `--kb`/`KB_DIR`, or you haven't run `kb init`. If the path repeats a suffix like `memory-bank/fedramp/memory-bank/fedramp`, set `KB_DIR` to an absolute path. |
 
 ---
 
@@ -356,8 +370,8 @@ source, every synthesized citation resolves to an in-scope active claim, and not
   corrections enter as claims; full bidirectional editing is deferred.)
 - **Exact-match entity resolution** — no fuzzy auto-merge; surface-form variants that don't
   normalize identically become distinct entities.
-- **Structural answer-check** — confirms citations resolve to active claims, not that a claim
-  semantically entails the sentence (read the quotes).
+- **Structural answer-check** — confirms citations resolve to active or conflicted claims, not
+  that a claim semantically entails the sentence (read the quotes).
 - **No node move/split/merge command yet** — restructure by creating new nodes and
   re-applying claims.
 - Single-user, local. No web UI, no multi-user, no embeddings/vector search.

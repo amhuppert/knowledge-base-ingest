@@ -80,4 +80,15 @@ export class RelationshipSpanRepo {
       )
       .run(relationshipId, spanId, role);
   }
+
+  /** Spans (joined) that support a relationship, for provenance display. */
+  spansForRelationship(relationshipId: RelationshipId): Span[] {
+    return this.db
+      .prepare(
+        `SELECT s.* FROM spans s JOIN relationship_spans rs ON rs.span_id = s.id
+         WHERE rs.relationship_id = ? ORDER BY s.char_start`,
+      )
+      .all(relationshipId)
+      .map((r) => SpanRow.parse(r));
+  }
 }

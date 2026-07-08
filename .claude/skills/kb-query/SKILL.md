@@ -8,8 +8,9 @@ description: Answer a question from a kb-ingest knowledge base with source-cited
 # Answer questions from the knowledge base (with provenance)
 
 Answer using ONLY what the knowledge base actually contains, and cite every assertion back
-to a source-backed claim. Uses the `kb` CLI (`./bin/kb` in this repo). Set `KB_DIR` or pass
-`--kb <dir>`.
+to a source-backed claim. Uses the globally installed `kb` CLI. Set `KB_DIR` to an
+absolute KB root, or pass `--kb <absolute-dir>`. Avoid bare relative `KB_DIR` values
+because later `cd` commands rebase them.
 
 ## Non-negotiables
 - **Evidence is a claim.** Build the answer from claims returned by `kb ask-context`, each
@@ -46,9 +47,9 @@ to a source-backed claim. Uses the `kb` CLI (`./bin/kb` in this repo). Set `KB_D
    `ok:false` means a problem: `unknownCitations` (cited a non-existent claim),
    `inactiveCitations` (cited a superseded/retracted claim), or `uncitedSentences`
    (assertive sentences with no citation). Fix and re-check until `ok:true`.
-   (Note: this is a STRUCTURAL check — it confirms citations resolve to active claims, not
-   semantic entailment. Still read the quotes to ensure each claim truly supports your
-   sentence.)
+   (Note: this is a STRUCTURAL check — it confirms citations resolve to usable active or
+   conflicted claims, not semantic entailment. Still read the quotes to ensure each claim
+   truly supports your sentence.)
 
 4. **Present** the answer to the user. Render each citation as the claim's source quote so
    the user can trace it, e.g. a short "Sources" list mapping each `[^clm_…]` to its quote

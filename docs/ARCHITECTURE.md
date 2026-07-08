@@ -245,7 +245,7 @@ The division of labor between deterministic CLI work and agent judgment:
 | Verify quotes, persist claims + spans (atomic) | CLI | `ClaimService` |
 | Decide entities/relationships + evidence | **agent** | (skill) |
 | Resolve + persist graph (atomic) | CLI | `GraphService` |
-| Adjudicate conflicts/supersession | **agent** | (skill) + `claim supersede` |
+| Adjudicate conflicts/supersession | **agent** | (skill) + `claim conflict` / `claim supersede` |
 | Build/choose synthesis nodes | **agent** | `node create` |
 | Mark stale (automatic on claim apply / node create) | CLI | recursive CTE |
 | Re-synthesize stale nodes bottom-up | **agent** | `synthesize` |
@@ -259,8 +259,10 @@ appends to `changelog`.
 - **Source level:** `ingest --supersedes <old>` marks the old source `superseded`.
 - **Claim level:** the agent adds the new claim, then `claim supersede <old> --by <new>` sets
   the old claim `superseded` (with `superseded_by_claim_id`) and marks affected nodes stale.
-- **Unresolved disagreement:** both claims stay, status `conflicted`; they surface in
-  `kb/open-questions.md`. (Setting `conflicted` is a manual/agent step in V1.)
+- **Unresolved disagreement:** both claims stay and `claim conflict <claim_a> <claim_b>` sets
+  their status to `conflicted`; they surface in `kb/open-questions.md`.
+- **Directly stated gaps:** `claim_type = 'open_question'` claims also surface in
+  `kb/open-questions.md`.
 
 ---
 
@@ -275,7 +277,7 @@ bodies; all ordering comes from stable `ORDER BY`). It produces, under `kb/`:
   footnote section resolving every `[^clm_…]` to its claim text + exact source quote + stored
   path.
 - `index.md` (sources + links), `changelog.md`, `open-questions.md`, `graph/entities.md`,
-  `graph/relationships.md`.
+  `graph/relationships.md`. Relationship rows include their stored evidence quotes.
 
 `writeRender` writes the files and records each `content_hash` in `rendered_files`.
 `checkRender` (via `render --check`) recomputes and reports `ok | missing | drifted` — the
@@ -347,7 +349,7 @@ read-only contract is enforced by detection, not file permissions.
 
 ## 14. Testing strategy
 
-Built test-first (red/green/refactor). 94 tests across 14 files; `pnpm test`, `pnpm typecheck`.
+Built test-first (red/green/refactor). 98 tests across 14 files; `pnpm test`, `pnpm typecheck`.
 
 | Layer | How it's tested |
 |---|---|

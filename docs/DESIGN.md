@@ -155,7 +155,7 @@ claim, span) → no duplicate provenance; same relationship triple → update, n
 source → new hash, may `--supersedes` old → step 7 supersedes old claims rather than duplicating.
 
 **Conflict handling:** never silently overwrite. Explicit supersession evidence → old claim
-`superseded`. Disagreement without precedence → both `conflicted`, open question created,
+`superseded`. Disagreement without precedence → mark both claims `conflicted`,
 synthesis must state the conflict and cite both sides.
 
 ## 5. CLI surface (`kb`)
@@ -165,13 +165,12 @@ text. Read commands never mutate; mutations append to `changelog`.
 
 **Lifecycle/ingest (mutation):** `kb init <dir>` · `kb ingest <path> [--supersedes <id>]
 [--title T] [--source-date D]` (steps 1–3, prints context bundle) · `kb claim apply <json>`
-(steps 5) · `kb graph apply <json>` (step 6) · `kb node create|move|split` · `kb synthesize
-<node> <json>` (step 10) · `kb source supersede <old> <new>` · `kb propagate` · `kb render
+(steps 5) · `kb claim conflict <claim...>` · `kb claim supersede <old> --by <new>` ·
+`kb graph apply <json>` (step 6) · `kb node create` · `kb synthesize --file <json>` · `kb propagate` · `kb render
 [--check]`.
 
-**Read/query:** `kb status` · `kb search <q> [--scope sources|claims|nodes|entities]` · `kb
-source show|chunks <id>` · `kb claim show <id> --with-provenance` · `kb provenance <claim>`
-(full chain to bytes) · `kb node tree|show|stale` · `kb entity show|neighbors <id>` · `kb
+**Read/query:** `kb status` · `kb search <q> [--scope chunks|claims|nodes|entities|all]` · `kb
+source show|chunks <id>` · `kb provenance <claim>` (full chain to bytes) · `kb node tree|show` · `kb entity show <id>` · `kb
 ask-context <q>` (retrieve claims+nodes+entities+spans for Q&A) · `kb answer-check <json>`
 (reject answer sentences lacking resolvable provenance) · `kb verify [--strict]`.
 
@@ -251,7 +250,8 @@ FTS5 (external-content, 3 triggers each: insert / delete / update): `chunks_fts`
 **Dropped from §2 for V1:** `entity_types`/`relationship_types` (type is TEXT + a recommended
 vocabulary the skill documents), `entity_aliases`, `node_claims` join (claims carry `node_id`
 directly — one owning leaf per claim), `open_questions` table (conflicts live as claim
-`status='conflicted'` + `superseded_by_claim_id`; `open-questions.md` is rendered from those),
+`status='conflicted'`; `open-questions.md` is rendered from conflicted claims and
+`claim_type='open_question'` claims),
 `token_budget`, revision-counter columns, `entities_fts`.
 
 ### Knowledge graph — first-class but lean
@@ -306,4 +306,3 @@ Node, Entity, Provenance, Staleness; repos + a `SourceStore` injected) → `rend
 ### Skills — three
 `kb-create`, `kb-ingest`, `kb-query` (project-local under `.claude/skills/`, wrapping the `kb`
 CLI). Maintenance guidance folds into a section of each.
-

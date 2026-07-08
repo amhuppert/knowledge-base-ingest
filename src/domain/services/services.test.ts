@@ -224,12 +224,22 @@ describe('GraphService', () => {
     };
     const r = new GraphService(ctx).apply(payload);
     expect(r.entitiesCreated).toBe(2);
+    expect(r.entitiesUpdated).toBe(0);
+    expect(r.entitiesUnchanged).toBe(0);
+    expect(r.entitiesReferenced).toBe(2);
     expect(r.relationshipsCreated).toBe(1);
+    expect(r.relationshipsUpdated).toBe(0);
+    expect(r.relationshipsUnchanged).toBe(0);
     expect(repos.relationships.listAll()).toHaveLength(1);
 
     const again = new GraphService(ctx).apply(payload);
     expect(again.entitiesCreated).toBe(0);
+    expect(again.entitiesUpdated).toBe(0);
+    expect(again.entitiesUnchanged).toBe(2);
+    expect(again.entitiesReferenced).toBe(2);
     expect(again.relationshipsCreated).toBe(0);
+    expect(again.relationshipsUpdated).toBe(0);
+    expect(again.relationshipsUnchanged).toBe(1);
     expect(repos.entities.listAll()).toHaveLength(2);
   });
 });

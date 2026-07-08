@@ -42,6 +42,24 @@ export function resolveKbRoot(cwd: string, explicit?: string): string {
   return resolve(cwd);
 }
 
+function repeatedPathSuffix(root: string): string | undefined {
+  const parts = resolve(root).split(/[\\/]+/).filter(Boolean);
+  for (let length = Math.floor(parts.length / 2); length >= 2; length--) {
+    const suffix = parts.slice(-length).join('/');
+    const previous = parts.slice(-2 * length, -length).join('/');
+    if (suffix === previous) return suffix;
+  }
+  return undefined;
+}
+
+export function kbRootWarnings(root: string): string[] {
+  const suffix = repeatedPathSuffix(root);
+  if (!suffix) return [];
+  return [
+    `Resolved KB root "${root}" contains repeated path suffix "${suffix}". Check --kb/KB_DIR; if using KB_DIR, prefer an absolute KB_DIR so later cd commands cannot rebase it.`,
+  ];
+}
+
 function build(root: string, db: Db, now: () => string): Workspace {
   const repos = new Repositories(db);
   const ctx: ServiceContext = { repos, store: new FsSourceStore(root), now };

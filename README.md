@@ -44,7 +44,7 @@ other subjects.
 
 ```bash
 pnpm install
-export KB_DIR=./my-kb
+export KB_DIR="$(pwd)/my-kb"
 
 ./bin/kb init "$KB_DIR"
 ./bin/kb ingest path/to/doc.md --source-date 2026-05-01 --json
@@ -65,11 +65,13 @@ The agent normally drives these via the three skills in `.claude/skills/`:
 ## CLI commands
 
 `init`, `status`, `ingest`, `source show|chunks`, `node create|tree|show`, `claim apply`,
-`claim supersede`, `graph apply`, `synthesize`, `propagate`, `verify [--strict]`,
+`claim conflict`, `claim supersede`, `graph apply`, `synthesize`, `propagate`, `verify [--strict]`,
 `render [--check]`, `search`, `ask-context`, `answer-check`, `provenance`, `entity show`.
 
 All accept `--json` (machine output: `{ ok, data, warnings, errors }`) and resolve the KB
-from `--kb <dir>`, `$KB_DIR`, or the nearest `kb.sqlite` above the cwd.
+from `--kb <dir>`, `$KB_DIR`, or the nearest `kb.sqlite` above the cwd. Prefer an
+absolute `KB_DIR`; relative values are resolved from each command's cwd and can break after
+`cd`.
 
 ## How provenance works (the keystone)
 

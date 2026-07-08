@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { emit, ok, fail, type Envelope } from './output.js';
 import {
   resolveKbRoot,
+  kbRootWarnings,
   openWorkspace,
   initWorkspace,
   type Workspace,
@@ -84,11 +85,148 @@ function count(ws: Workspace, table: string): number {
 
 type Handler = (args: Args) => Envelope<unknown>;
 
+interface CommandHelp {
+  command: string;
+  usage: string;
+  summary: string;
+  input?: string;
+  output?: string;
+}
+
+const commandHelp: Record<string, CommandHelp> = {
+  init: {
+    command: 'init',
+    usage: 'kb init [<dir>] [--json]',
+    summary: 'Create or open a KB root, write scaffold files, and render the initial markdown.',
+    output: '{ root, created, scaffold, rendered }',
+  },
+  status: {
+    command: 'status',
+    usage: 'kb status [--json]',
+    summary: 'Print source, chunk, node, stale-node, claim, span, entity, and relationship counts.',
+  },
+  ingest: {
+    command: 'ingest',
+    usage: 'kb ingest <path> [--title T] [--source-date D] [--supersedes <src_id>] [--json]',
+    summary: 'Register an immutable source copy, normalize text, and create deterministic chunks.',
+    output: '{ sourceId, title, status, updated, chunks, next }',
+  },
+  'source show': {
+    command: 'source show',
+    usage: 'kb source show <source_id> [--json]',
+    summary: 'Show source metadata.',
+  },
+  'source chunks': {
+    command: 'source chunks',
+    usage: 'kb source chunks <source_id> [--json]',
+    summary: 'List chunks with ids, heading paths, and exact text for quote selection.',
+  },
+  'node create': {
+    command: 'node create',
+    usage: 'kb node create --title T --kind <root|topic|leaf> [--parent <node_id>] [--slug S] [--json]',
+    summary: 'Create a synthesis node.',
+  },
+  'node tree': {
+    command: 'node tree',
+    usage: 'kb node tree [--json]',
+    summary: 'List the synthesis hierarchy with depth, kind, stale flag, and claim counts.',
+  },
+  'node show': {
+    command: 'node show',
+    usage: 'kb node show <node_id> [--json]',
+    summary: 'Show a node and the claims it owns.',
+  },
+  'claim apply': {
+    command: 'claim apply',
+    usage: 'kb claim apply --file <claims.json> [--json]',
+    summary: 'Persist quote-verified claims atomically.',
+    input: '{ source_id, claims: [{ node_id, text, claim_type, confidence?, spans }] }',
+  },
+  'claim conflict': {
+    command: 'claim conflict',
+    usage: 'kb claim conflict <claim_id> [<claim_id> ...] [--json]',
+    summary: 'Mark one or more unresolved claims as conflicted and stale their owning nodes.',
+    output: '{ conflicted, staleNodes }',
+  },
+  'claim supersede': {
+    command: 'claim supersede',
+    usage: 'kb claim supersede <old_claim_id> --by <new_claim_id> [--json]',
+    summary: 'Mark an older claim superseded by another claim and stale affected nodes.',
+  },
+  'graph apply': {
+    command: 'graph apply',
+    usage: 'kb graph apply --file <graph.json> [--json]',
+    summary: 'Persist entities and quote-verified relationships atomically.',
+    input: '{ source_id, entities?, relationships? }',
+  },
+  synthesize: {
+    command: 'synthesize',
+    usage: 'kb synthesize --file <node.json> [--json]',
+    summary: 'Set node prose with inline claim citations and clear that node stale flag.',
+    input: '{ node_id, body_md, title?, summary? }',
+  },
+  propagate: {
+    command: 'propagate',
+    usage: 'kb propagate [--json]',
+    summary: 'Re-assert stale propagation from stale nodes to ancestors.',
+  },
+  render: {
+    command: 'render',
+    usage: 'kb render [--check] [--json]',
+    summary: 'Render generated markdown, or check rendered markdown for drift.',
+  },
+  verify: {
+    command: 'verify',
+    usage: 'kb verify [--strict] [--json]',
+    summary: 'Run provenance, citation, staleness, and FTS integrity checks.',
+  },
+  search: {
+    command: 'search',
+    usage: 'kb search <query> [--scope chunks|claims|nodes|entities|all] [--limit N] [--json]',
+    summary: 'Search chunks, claims, nodes, entities, or all scopes.',
+  },
+  'ask-context': {
+    command: 'ask-context',
+    usage: 'kb ask-context "<question>" [--limit N] [--json]',
+    summary: 'Retrieve relevant claims with provenance, plus related nodes and entities.',
+  },
+  'answer-check': {
+    command: 'answer-check',
+    usage: 'kb answer-check --file <answer.json> [--json]',
+    summary: 'Structurally validate that a drafted answer cites supported active claims.',
+  },
+  provenance: {
+    command: 'provenance',
+    usage: 'kb provenance <claim_id> [--json]',
+    summary: 'Show a claim and its source quotes, offsets, source titles, and stored paths.',
+  },
+  'entity show': {
+    command: 'entity show',
+    usage: 'kb entity show <entity_id> [--json]',
+    summary: 'Show an entity and its relationships.',
+  },
+};
+
+function globalHelp(): { commands: string[]; usage: string; help: string } {
+  return {
+    commands: Object.keys(handlers).sort(),
+    usage: 'kb <command> [args] [--json]',
+    help: 'Run kb <command> --help --json for command-specific usage.',
+  };
+}
+
 function withWs(args: Args, fn: (ws: Workspace) => Envelope<unknown>): Envelope<unknown> {
   const root = resolveKbRoot(process.cwd(), str(args.flags, 'kb'));
-  const ws = openWorkspace(root);
+  const rootWarnings = kbRootWarnings(root);
+  let ws: Workspace;
   try {
-    return fn(ws);
+    ws = openWorkspace(root);
+  } catch (e) {
+    return fail([(e as Error).message], rootWarnings);
+  }
+  try {
+    const env = fn(ws);
+    return { ...env, warnings: [...rootWarnings, ...env.warnings] };
   } finally {
     ws.close();
   }
@@ -102,7 +240,7 @@ const handlers: Record<string, Handler> = {
       const { wrote } = writeScaffold(ws.root);
       const files = renderAll(ws.repos);
       writeRender(ws.root, files, ws.repos, systemClock());
-      return ok({ root: result.root, created: result.created, scaffold: wrote, rendered: files.length });
+      return ok({ root: result.root, created: result.created, scaffold: wrote, rendered: files.length }, kbRootWarnings(result.root));
     } finally {
       ws.close();
     }
@@ -173,6 +311,31 @@ const handlers: Record<string, Handler> = {
   'claim apply': (args) => withWs(args, (ws) => ok(ws.claims.apply(ClaimApplySchema.parse(readPayload(args.flags))))),
 
   'graph apply': (args) => withWs(args, (ws) => ok(ws.graph.apply(GraphApplySchema.parse(readPayload(args.flags))))),
+
+  'claim conflict': (args) =>
+    withWs(args, (ws) => {
+      if (args.positionals.length === 0) return fail(['usage: kb claim conflict <claim_id> [<claim_id> ...]']);
+      const claimIds = args.positionals.map((id) => makeClaimId(id));
+      const claims = claimIds.map((id) => ws.repos.claims.getById(id));
+      const missing = claimIds.filter((_, i) => claims[i] === undefined);
+      if (missing.length > 0) return fail(missing.map((id) => `unknown claim ${id}`));
+
+      const now = systemClock();
+      ws.repos.tx(() => {
+        for (const claim of claims) {
+          if (!claim) continue;
+          ws.repos.claims.setStatus(claim.id, 'conflicted', null, now);
+          if (claim.nodeId) ws.repos.nodes.markStaleWithAncestors(claim.nodeId, now);
+        }
+        ws.repos.changelog.append({
+          ts: now,
+          op: 'claim_conflict',
+          summary: `Marked ${claimIds.length} claim(s) conflicted`,
+          detail: { claims: claimIds },
+        });
+      });
+      return ok({ conflicted: claimIds, staleNodes: ws.repos.nodes.listStaleDeepestFirst().length });
+    }),
 
   'claim supersede': (args) =>
     withWs(args, (ws) => {
@@ -329,8 +492,19 @@ function main(): void {
   const json = parsed.flags.json === true;
   const { cmd, rest } = resolveCommand(parsed.positionals);
 
-  if (!cmd || parsed.flags.help) {
-    emit(ok({ commands: Object.keys(handlers).sort(), usage: 'kb <command> [args] [--json]' }), json);
+  if (!cmd) {
+    emit(ok(globalHelp()), json);
+    return;
+  }
+
+  if (parsed.flags.help) {
+    const help = commandHelp[cmd];
+    if (help) {
+      emit(ok(help), json);
+      return;
+    }
+    emit(fail([`unknown command: ${cmd}`, `known: ${Object.keys(handlers).sort().join(', ')}`]), json);
+    process.exitCode = 1;
     return;
   }
 
