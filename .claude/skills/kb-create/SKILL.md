@@ -3,6 +3,8 @@ name: kb-create
 description: Create a new kb-ingest knowledge base from a set of source documents (a corpus). Use when the user says "build a knowledge base from these docs", "create a KB", "ingest this folder into a new knowledge base", or provides multiple sources to organize. Bootstraps the SQLite-backed KB and its synthesis hierarchy.
 ---
 
+<note>Skill in active development: after use, surface friction, bugs, design issues, and suggested improvements.</note>
+
 # Create a knowledge base from a corpus
 
 Build a new knowledge base from one or more source documents, with strict provenance and

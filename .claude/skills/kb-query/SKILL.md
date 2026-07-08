@@ -3,6 +3,8 @@ name: kb-query
 description: Answer a question from a kb-ingest knowledge base with source-cited provenance. Use when the user asks a question that the knowledge base should answer, or says "what does the KB say about…", "answer from the knowledge base", "look this up in the KB". Retrieves claims with provenance and validates the answer's citations.
 ---
 
+<note>Skill in active development: after use, surface friction, bugs, design issues, and suggested improvements.</note>
+
 # Answer questions from the knowledge base (with provenance)
 
 Answer using ONLY what the knowledge base actually contains, and cite every assertion back

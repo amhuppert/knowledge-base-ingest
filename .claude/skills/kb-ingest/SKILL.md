@@ -3,6 +3,8 @@ name: kb-ingest
 description: Ingest a new source document into a kb-ingest knowledge base and update the synthesis. Use when the user says "ingest this into the knowledge base", "add this source", "update the KB with this document", or points at a file/URL to integrate. Drives the `kb` CLI (SQLite-backed, strict provenance).
 ---
 
+<note>Skill in active development: after use, surface friction, bugs, design issues, and suggested improvements.</note>
+
 # Ingest a source into the knowledge base
 
 The knowledge base is managed by the `kb` CLI (run via `./bin/kb` in this repo, or `kb`
