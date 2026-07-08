@@ -1,3 +1,5 @@
+**Experimental project**, not for production use.
+
 # knowledge-base-ingest
 
 An agent-driven knowledge base: an AI coding agent (Claude Code) uses the `kb` CLI to
