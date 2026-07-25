@@ -240,6 +240,38 @@ CREATE TRIGGER nodes_fts_au AFTER UPDATE ON nodes BEGIN
 END;
 `;
 
+/**
+ * Claim→span link identity is `(claim_id, span_id)`, NOT `(claim_id, span_id, role)`
+ * (03 §4, finding 21): a differing role on the same edge UPDATES the existing link
+ * (role is a mutable attribute, confidence monotone), rather than minting a second
+ * parallel edge. Rebuild `claim_spans` with the two-column primary key, collapsing any
+ * pre-existing per-role duplicates to the highest-confidence row for each edge.
+ */
+const CLAIM_SPAN_LINK_IDENTITY = /* sql */ `
+CREATE TABLE claim_spans_v2 (
+  claim_id   TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+  span_id    TEXT NOT NULL REFERENCES spans(id) ON DELETE CASCADE,
+  role       TEXT NOT NULL DEFAULT 'supports'
+               CHECK (role IN ('supports','contradicts','context','supersedes')),
+  confidence REAL NOT NULL DEFAULT 0.8 CHECK (confidence >= 0 AND confidence <= 1),
+  extractor  TEXT NOT NULL DEFAULT 'agent' CHECK (extractor IN ('agent','cli','human')),
+  PRIMARY KEY (claim_id, span_id)
+) STRICT;
+
+INSERT INTO claim_spans_v2 (claim_id, span_id, role, confidence, extractor)
+  SELECT claim_id, span_id, role, confidence, extractor FROM claim_spans cs
+  WHERE cs.rowid = (
+    SELECT x.rowid FROM claim_spans x
+    WHERE x.claim_id = cs.claim_id AND x.span_id = cs.span_id
+    ORDER BY x.confidence DESC, x.rowid ASC LIMIT 1
+  );
+
+DROP TABLE claim_spans;
+ALTER TABLE claim_spans_v2 RENAME TO claim_spans;
+CREATE INDEX ix_claim_spans_span ON claim_spans(span_id);
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'init', sql: INIT },
+  { version: 2, name: 'claim_span_link_identity', sql: CLAIM_SPAN_LINK_IDENTITY },
 ];

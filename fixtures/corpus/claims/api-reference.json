@@ -1,0 +1,61 @@
+{
+  "source_id": "src_99b80b69b34da7d3",
+  "claims": [
+    {
+      "node_id": "nod_1a1bbbd35770b507",
+      "text": "Clients authenticate with an API key in the Authorization header.",
+      "claim_type": "fact",
+      "confidence": 0.9,
+      "spans": [
+        {
+          "chunk_id": "chk_9358ab6b40c96a45",
+          "quote": "Clients authenticate with an API key passed in the Authorization header",
+          "role": "supports",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "node_id": "nod_815fa596b2ea21ac",
+      "text": "The /v1/limits endpoint returns the current quota.",
+      "claim_type": "fact",
+      "confidence": 0.9,
+      "spans": [
+        {
+          "chunk_id": "chk_37ba319ecc7d695d",
+          "quote": "The /v1/limits endpoint returns the current quota for the authenticated client",
+          "role": "supports",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "node_id": "nod_c9d3d704e53ef6b8",
+      "text": "The Gateway service returns HTTP 429 when a client exceeds its quota.",
+      "claim_type": "fact",
+      "confidence": 0.9,
+      "spans": [
+        {
+          "chunk_id": "chk_3c15278c4b1c8c26",
+          "quote": "the Gateway service returns HTTP 429",
+          "role": "supports",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "node_id": "nod_2bbad906d4e065a9",
+      "text": "List endpoints return at most fifty items per page.",
+      "claim_type": "constraint",
+      "confidence": 0.9,
+      "spans": [
+        {
+          "chunk_id": "chk_71d982ff0af2f6fe",
+          "quote": "List endpoints return at most fifty items per page",
+          "role": "supports",
+          "confidence": 0.9
+        }
+      ]
+    }
+  ]
+}

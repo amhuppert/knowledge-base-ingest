@@ -1,0 +1,20 @@
+{
+  "nodes": [
+    { "node_id": "nod_717ca2b0939923f7", "body_md": "" },
+    { "node_id": "nod_f65f68035da154c1", "body_md": "The token store keeps per-client counters in Redis for low-latency reads.[^clm_5e3fe6f8db369532]" },
+    { "node_id": "nod_143c4c1f954e0937", "body_md": "Rejected requests return a 429 status with a Retry-After header.[^clm_a1afd01dbc173d1d]" },
+    { "node_id": "nod_ab3a77075b3e40d5", "body_md": "" },
+    { "node_id": "nod_1a1bbbd35770b507", "body_md": "Clients authenticate with an API key passed in the Authorization header.[^clm_36cfb9f6ac6d72c5]" },
+    { "node_id": "nod_815fa596b2ea21ac", "body_md": "The /v1/limits endpoint returns the current quota for the authenticated client.[^clm_2dba27d146934f6a]" },
+    { "node_id": "nod_c9d3d704e53ef6b8", "body_md": "The Gateway service returns HTTP 429 when a client exceeds its quota.[^clm_10d2571671858b9b]" },
+    { "node_id": "nod_2bbad906d4e065a9", "body_md": "List endpoints return at most fifty items per page.[^clm_4456aebfa2e7a0be]" },
+    { "node_id": "nod_e2dc8cd1fcf18c5a", "body_md": "" },
+    { "node_id": "nod_201c9799ff3508df", "body_md": "Alerts fire when the rejection rate exceeds five percent.[^clm_bb92b1744d8314f4]" },
+    { "node_id": "nod_f35c594fb1edcc6c", "body_md": "" },
+    { "node_id": "nod_914b308b84726ed0", "body_md": "" },
+    { "node_id": "nod_563124d170a8508c", "body_md": "Redis was chosen as the counter store for its atomic increment operations.[^clm_0e46ae81bdf5fa3c]" },
+    { "node_id": "nod_23b022cb91d8fa3b", "body_md": "RateGuard uses a token-bucket algorithm.[^clm_ac4503e287c856ef] The default rate limit is 100 requests per second[^clm_20e5846f3d00bec6], though the team agreed to raise it to 1000 requests per second.[^clm_ba0a11995afc89d8]" },
+    { "node_id": "nod_5cc3194ad86019ad", "body_md": "It remains undecided how to handle clients that share an IP address.[^clm_cd88de4eb8add55a]" },
+    { "node_id": "nod_3523e28b1edd53db", "body_md": "" }
+  ]
+}

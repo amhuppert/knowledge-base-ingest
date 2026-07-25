@@ -1,0 +1,66 @@
+{
+  "source_id": "src_99b80b69b34da7d3",
+  "entities": [
+    {
+      "type": "Service",
+      "name": "Gateway service",
+      "description": "Edge service that authenticates and rate-limits incoming requests."
+    },
+    {
+      "type": "Service",
+      "name": "Accounts service",
+      "description": "Validates API keys on behalf of the Gateway."
+    },
+    {
+      "type": "Service",
+      "name": "Metrics service",
+      "description": "Consumes the Gateway audit log for reporting."
+    },
+    {
+      "type": "Endpoint",
+      "name": "/v1/limits",
+      "description": "Returns the current quota for the authenticated client."
+    }
+  ],
+  "relationships": [
+    {
+      "type": "depends_on",
+      "subject": { "type": "Service", "name": "Gateway service" },
+      "object": { "type": "Service", "name": "Accounts service" },
+      "description": "The Gateway validates API keys against the Accounts service.",
+      "evidence": [
+        {
+          "chunk_id": "chk_9358ab6b40c96a45",
+          "quote": "The Gateway service validates the key against the Accounts service",
+          "role": "supports"
+        }
+      ]
+    },
+    {
+      "type": "exposes",
+      "subject": { "type": "Service", "name": "Gateway service" },
+      "object": { "type": "Endpoint", "name": "/v1/limits" },
+      "description": "The Gateway exposes the limits endpoint.",
+      "evidence": [
+        {
+          "chunk_id": "chk_37ba319ecc7d695d",
+          "quote": "The Gateway service exposes the /v1/limits endpoint",
+          "role": "supports"
+        }
+      ]
+    },
+    {
+      "type": "consumes",
+      "subject": { "type": "Service", "name": "Metrics service" },
+      "object": { "type": "Service", "name": "Gateway service" },
+      "description": "The Metrics service consumes the Gateway audit log.",
+      "evidence": [
+        {
+          "chunk_id": "chk_37ba319ecc7d695d",
+          "quote": "The Metrics service consumes the audit log produced by the Gateway service",
+          "role": "supports"
+        }
+      ]
+    }
+  ]
+}

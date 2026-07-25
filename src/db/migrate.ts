@@ -1,4 +1,4 @@
-import type { Db } from './connection.js';
+import { openDbReadonly, type Db } from './connection.js';
 import { MIGRATIONS } from './migrations.js';
 
 export interface MigrateResult {
@@ -63,6 +63,43 @@ export function migrate(db: Db): MigrateResult {
   ).run(String(schemaVersion));
 
   return { applied, schemaVersion };
+}
+
+/**
+ * The on-disk schema version recorded in `meta`, or `null` when it cannot be read
+ * (no `meta` row / table). Never migrates and never throws — the caller decides what
+ * a mismatch means (`assertSchemaCompatible` throws; `kb version` merely reports it).
+ */
+export function readSchemaVersion(db: Db): number | null {
+  try {
+    const row = db.prepare("SELECT v FROM meta WHERE k='schema_version'").get() as { v: string } | undefined;
+    return row ? Number(row.v) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A genuinely read-only schema probe for `kb version`: open `dbPath` with
+ * `openDbReadonly` (SQLITE_OPEN_READONLY, no `journal_mode = WAL`, no sidecar files, no
+ * mutation), read its recorded schema version, and close — WITHOUT running migrations and
+ * WITHOUT the too-new guard, so `kb version` works even against a broken, forward-
+ * incompatible, or read-only-on-disk KB (02 §2). Returns `null` when the version cannot be
+ * determined — even a failure to OPEN is swallowed to null, so `version` still answers.
+ * The caller only invokes this once the DB file is known to exist.
+ */
+export function probeSchemaVersion(dbPath: string): number | null {
+  let db: Db;
+  try {
+    db = openDbReadonly(dbPath);
+  } catch {
+    return null;
+  }
+  try {
+    return readSchemaVersion(db);
+  } finally {
+    db.close();
+  }
 }
 
 /**

@@ -19,3 +19,18 @@ export function openDb(path: string): Db {
   }
   return db;
 }
+
+/**
+ * Open a KB database READ-ONLY for a pure inspection (the `kb version` schema probe;
+ * 02 §2). Unlike `openDb`, it opens with `SQLITE_OPEN_READONLY` and sets NO pragmas
+ * that write to the file — critically NOT `journal_mode = WAL`, which mutates the DB
+ * header and spawns `-wal`/`-shm` sidecars and would fail on a read-only-on-disk KB.
+ * Only `busy_timeout` (a connection-scoped setting that never touches the file) is set,
+ * so the probe never migrates, never mutates, and answers even when a normal open would.
+ * The caller must ensure the file exists (better-sqlite3 will not create it here).
+ */
+export function openDbReadonly(path: string): Db {
+  const db = new Database(path, { readonly: true });
+  db.pragma('busy_timeout = 5000');
+  return db;
+}

@@ -14,10 +14,13 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "docs:html": "node scripts/build-docs.mjs"
+    "docs:commands": "node scripts/gen-command-docs.mjs",
+    "docs:html": "node scripts/build-docs.mjs",
+    "docs": "pnpm docs:commands && pnpm docs:html"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",
+    "commander": "^14",
     "zod": "^3.24.1"
   },
   "devDependencies": {

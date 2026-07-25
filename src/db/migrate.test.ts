@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
+import Database from 'better-sqlite3';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { openDb } from './connection.js';
-import { migrate, currentSchemaVersion } from './migrate.js';
+import { migrate, currentSchemaVersion, probeSchemaVersion } from './migrate.js';
 
 function freshDb() {
   const db = openDb(':memory:');
@@ -67,6 +71,48 @@ describe('migrate', () => {
         )
         .run(),
     ).toThrow(/CHECK/i);
+  });
+
+  it('probeSchemaVersion reads read-only: no journal_mode=WAL switch, no sidecar files, no mutation', () => {
+    // 02 §2: the version probe must be GENUINELY read-only. Build a DELETE-journal DB
+    // (NOT WAL) with a recorded schema version; a probe that opened via the writable
+    // `openDb` would run `PRAGMA journal_mode=WAL`, flipping the header and spawning a
+    // `-wal` sidecar. The read-only probe must do none of that.
+    const dir = mkdtempSync(join(tmpdir(), 'kb-probe-'));
+    const dbPath = join(dir, 'kb.sqlite');
+    try {
+      const setup = new Database(dbPath);
+      setup.pragma('journal_mode = DELETE');
+      setup.exec('CREATE TABLE meta(k TEXT PRIMARY KEY, v TEXT NOT NULL)');
+      setup.prepare("INSERT INTO meta(k, v) VALUES ('schema_version', '7')").run();
+      setup.close();
+      expect(existsSync(`${dbPath}-wal`)).toBe(false);
+
+      expect(probeSchemaVersion(dbPath)).toBe(7);
+
+      // The probe left the DB untouched: still DELETE journal mode, no WAL/shm sidecars.
+      const check = new Database(dbPath, { readonly: true });
+      const mode = check.pragma('journal_mode', { simple: true }) as string;
+      check.close();
+      expect(mode).toBe('delete');
+      expect(existsSync(`${dbPath}-wal`)).toBe(false);
+      expect(existsSync(`${dbPath}-shm`)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('probeSchemaVersion returns null (never throws) when no schema version is recorded', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kb-probe-'));
+    const dbPath = join(dir, 'kb.sqlite');
+    try {
+      const setup = new Database(dbPath);
+      setup.exec('CREATE TABLE unrelated(x)'); // no meta table at all
+      setup.close();
+      expect(probeSchemaVersion(dbPath)).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('keeps chunks_fts in sync through insert, update, and delete', () => {

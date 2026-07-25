@@ -50,6 +50,26 @@ export class NodeRepo {
       .map((r) => NodeRow.parse(r));
   }
 
+  /**
+   * The node and every descendant, in one recursive walk (04 §1). Ordered
+   * `(depth, sort_order, id)` — the same total order the synthesis-context bundle
+   * uses to tag claim owners, so a caller never needs a second query per level.
+   */
+  listSubtree(nodeId: NodeId): Node[] {
+    return this.db
+      .prepare(
+        `WITH RECURSIVE sub(id) AS (
+           SELECT id FROM nodes WHERE id = ?
+           UNION
+           SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id
+         )
+         SELECT n.* FROM nodes n WHERE n.id IN (SELECT id FROM sub)
+         ORDER BY n.depth, n.sort_order, n.id`,
+      )
+      .all(nodeId)
+      .map((r) => NodeRow.parse(r));
+  }
+
   listStaleDeepestFirst(): Node[] {
     return this.db
       .prepare('SELECT * FROM nodes WHERE is_stale = 1 ORDER BY depth DESC, sort_order, id')
@@ -97,6 +117,16 @@ export class NodeRepo {
     this.db
       .prepare('UPDATE nodes SET is_stale = ?, updated_at = ? WHERE id = ?')
       .run(stale ? 1 : 0, updatedAt, id);
+  }
+
+  /**
+   * Clear a node's stale flag as a first-class, TIMESTAMPED state change (03 §4,
+   * finding 23): sets `is_stale = 0` AND `updated_at = now`. Used by the synthesize
+   * "stale-cleared" outcome — content is byte-identical but re-affirming freshness is
+   * still a real write, distinct from the content-carrying `updateBody`.
+   */
+  clearStale(id: NodeId, now: string): void {
+    this.db.prepare('UPDATE nodes SET is_stale = 0, updated_at = ? WHERE id = ?').run(now, id);
   }
 }
 

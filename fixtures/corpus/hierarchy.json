@@ -1,0 +1,60 @@
+{
+  "nodes": [
+    {
+      "ref": "root",
+      "slug": "rateguard",
+      "title": "RateGuard Knowledge Base",
+      "kind": "root",
+      "children": [
+        {
+          "ref": "architecture",
+          "slug": "architecture",
+          "title": "Architecture",
+          "kind": "topic",
+          "children": [
+            { "ref": "rate-limiter", "slug": "rate-limiter", "title": "Rate Limiter", "kind": "leaf" },
+            { "ref": "token-store", "slug": "token-store", "title": "Token Store", "kind": "leaf" },
+            { "ref": "request-pipeline", "slug": "request-pipeline", "title": "Request Pipeline", "kind": "leaf" },
+            { "ref": "caching-layer", "slug": "caching-layer", "title": "Caching Layer", "kind": "leaf" }
+          ]
+        },
+        {
+          "ref": "api",
+          "slug": "api",
+          "title": "API Surface",
+          "kind": "topic",
+          "children": [
+            { "ref": "authentication", "slug": "authentication", "title": "Authentication", "kind": "leaf" },
+            { "ref": "endpoints", "slug": "endpoints", "title": "Endpoints", "kind": "leaf" },
+            { "ref": "error-responses", "slug": "error-responses", "title": "Error Responses", "kind": "leaf" },
+            { "ref": "pagination", "slug": "pagination", "title": "Pagination", "kind": "leaf" }
+          ]
+        },
+        {
+          "ref": "operations",
+          "slug": "operations",
+          "title": "Operations",
+          "kind": "topic",
+          "children": [
+            { "ref": "deployment", "slug": "deployment", "title": "Deployment", "kind": "leaf" },
+            { "ref": "monitoring", "slug": "monitoring", "title": "Monitoring", "kind": "leaf" },
+            { "ref": "scaling", "slug": "scaling", "title": "Scaling", "kind": "leaf" },
+            { "ref": "incident-response", "slug": "incident-response", "title": "Incident Response", "kind": "leaf" }
+          ]
+        },
+        {
+          "ref": "decisions",
+          "slug": "decisions",
+          "title": "Decisions",
+          "kind": "topic",
+          "children": [
+            { "ref": "storage-choice", "slug": "storage-choice", "title": "Storage Choice", "kind": "leaf" },
+            { "ref": "rate-limit-algorithm", "slug": "rate-limit-algorithm", "title": "Rate Limit Algorithm", "kind": "leaf" },
+            { "ref": "open-questions", "slug": "open-questions", "title": "Open Questions", "kind": "leaf" },
+            { "ref": "rollout-plan", "slug": "rollout-plan", "title": "Rollout Plan", "kind": "leaf" }
+          ]
+        }
+      ]
+    }
+  ]
+}

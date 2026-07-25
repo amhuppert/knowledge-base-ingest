@@ -29,6 +29,13 @@ export const EXTRACTORS = ['agent', 'cli', 'human'] as const;
 export type Extractor = (typeof EXTRACTORS)[number];
 
 /**
+ * Whether a `--text-from` transcription was checked against the original (06 §2).
+ * `visual` is an explicit agent statement; `none` is the default.
+ */
+export const TEXT_VERIFICATIONS = ['visual', 'none'] as const;
+export type TextVerification = (typeof TEXT_VERIFICATIONS)[number];
+
+/**
  * Recommended knowledge-graph vocabulary for the software/technical domain.
  * NOT enforced by the DB (entity/relationship `type` is free TEXT) — the skills
  * point the agent at these so usage stays consistent, while remaining extensible.

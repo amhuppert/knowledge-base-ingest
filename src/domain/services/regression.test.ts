@@ -105,8 +105,8 @@ describe('regression: verify catches a tampered graph-only span', () => {
     new GraphService(ctx).apply({
       source_id: src,
       entities: [
-        { type: 'Service', name: 'Svc', description: '', confidence: 0.9, evidence: [] },
-        { type: 'DataStore', name: 'Redis', description: '', confidence: 0.9, evidence: [] },
+        { type: 'Service', name: 'Svc', description: '', confidence: 0.9 },
+        { type: 'DataStore', name: 'Redis', description: '', confidence: 0.9 },
       ],
       relationships: [
         {
@@ -115,7 +115,7 @@ describe('regression: verify catches a tampered graph-only span', () => {
           object: { type: 'DataStore', name: 'Redis' },
           description: '',
           confidence: 0.9,
-          evidence: [{ chunk_id: chunkId(repos, src, 'depends on Redis'), quote: 'The service depends on Redis', role: 'supports' as const, confidence: 0.9 }],
+          evidence: [{ chunk_id: chunkId(repos, src, 'depends on Redis'), quote: 'The service depends on Redis', role: 'supports' as const }],
         },
       ],
     });

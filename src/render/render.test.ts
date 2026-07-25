@@ -96,8 +96,8 @@ function seed(): { ctx: ServiceContext; repos: Repositories; sourceId: SourceId;
   new GraphService(ctx).apply({
     source_id: sourceId,
     entities: [
-      { type: 'Service', name: 'auth service', description: 'the auth service', confidence: 0.9, evidence: [] },
-      { type: 'DataStore', name: 'PostgreSQL', description: 'session store', confidence: 0.9, evidence: [] },
+      { type: 'Service', name: 'auth service', description: 'the auth service', confidence: 0.9 },
+      { type: 'DataStore', name: 'PostgreSQL', description: 'session store', confidence: 0.9 },
     ],
     relationships: [
       {
@@ -106,7 +106,7 @@ function seed(): { ctx: ServiceContext; repos: Repositories; sourceId: SourceId;
         object: { type: 'DataStore', name: 'PostgreSQL' },
         description: 'sessions stored in pg',
         confidence: 0.8,
-        evidence: [{ chunk_id: pgChunk.id, quote: 'Sessions are stored in PostgreSQL', role: 'supports', confidence: 0.8 }],
+        evidence: [{ chunk_id: pgChunk.id, quote: 'Sessions are stored in PostgreSQL', role: 'supports' }],
       },
     ],
   });

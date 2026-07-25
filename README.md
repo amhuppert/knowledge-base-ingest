@@ -42,14 +42,26 @@ other subjects.
 
 ## Quick start
 
+`./bin/kb` runs straight from a clone with no build step (it uses `tsx`). Installing the
+package globally (`pnpm link --global`, or `npm i -g .`) puts a plain `kb` on your PATH —
+that is what the skills and all the examples in the docs call. The two are the same CLI;
+use `./bin/kb` in a fresh clone and `kb` once it is installed.
+
 ```bash
 pnpm install
-export KB_DIR="$(pwd)/my-kb"
+export KB_DIR="$(pwd)/my-kb"                      # absolute: a relative value rebases after cd
 
-./bin/kb init "$KB_DIR"
+# Preflight — which CLI am I running, and against which KB?
+./bin/kb version --json                           # cli + node + schema version, resolved kbRoot
+
+# Discovery — get contracts from the tool, never from memory
+./bin/kb --help --json                            # every command, grouped by workflow stage
+./bin/kb claim apply --help --json                # one command: flags, payload example, output
+
+./bin/kb init "$KB_DIR" --json
 ./bin/kb ingest path/to/doc.md --source-date 2026-05-01 --json
 ./bin/kb source chunks <sourceId> --json          # read chunks to find exact quotes
-./bin/kb node create --title "My Topic" --kind root --json
+./bin/kb node apply --file hierarchy.json --json  # the whole node tree in one atomic call
 ./bin/kb claim apply --file claims.json --json    # quote-verified claims
 ./bin/kb graph apply --file graph.json --json     # entities + relationships
 ./bin/kb synthesize --file node.json --json       # prose with [^clm_…] citations
@@ -58,20 +70,26 @@ export KB_DIR="$(pwd)/my-kb"
 ./bin/kb ask-context "a question" --json          # retrieve claims+provenance to answer
 ```
 
+Preview before you persist: `ingest`, `node apply`, `claim apply`, `graph apply`, and
+`synthesize` all accept `--dry-run`, which validates the payload and reports what would
+change without writing.
+
 The agent normally drives these via the three skills in `.claude/skills/`:
 **kb-create** (build a KB from a corpus), **kb-ingest** (add one source), **kb-query**
 (answer a question with provenance).
 
 ## CLI commands
 
-`init`, `status`, `ingest`, `source show|chunks`, `node create|tree|show`, `claim apply`,
-`claim conflict`, `claim supersede`, `graph apply`, `synthesize`, `propagate`, `verify [--strict]`,
-`render [--check]`, `search`, `ask-context`, `answer-check`, `provenance`, `entity show`.
+Run `./bin/kb --help --json` for the authoritative list — it is generated from the
+registered commands, so it can never advertise something this build does not ship. The
+full reference in [docs/USER_GUIDE.md](docs/USER_GUIDE.md#6-cli-reference) is generated
+from those same calls by `pnpm docs:commands`.
 
-All accept `--json` (machine output: `{ ok, data, warnings, errors }`) and resolve the KB
-from `--kb <dir>`, `$KB_DIR`, or the nearest `kb.sqlite` above the cwd. Prefer an
-absolute `KB_DIR`; relative values are resolved from each command's cwd and can break after
-`cd`.
+Every command accepts `--json` (the envelope
+`{ ok, data, issues, errors, warnings, nextActions, hints }`; exit code `1` when
+`ok:false`) and resolves the KB from `--kb <dir>`, `$KB_DIR`, or the nearest `kb.sqlite`
+above the cwd. Prefer an absolute `KB_DIR`; relative values are resolved from each
+command's cwd and can break after `cd`.
 
 ## How provenance works (the keystone)
 

@@ -1,0 +1,93 @@
+{
+  "note": "Reconstructed retrieval cases against fixtures/corpus (a reconstruction of the report's Q&A shape, not captured traffic). expectAnyOf holds real claim ids from the fixture build (deterministic). Retrieval targets the claims scope. scripts/eval-retrieval.ts records CURRENT (pre-fix) behavior: the claims scope uses a static AND join, so multi-term natural-language questions legitimately return zero results here. Phase 3 (05 \u00a73) adds the per-scope AND->OR fallback and turns this fixture into a hard gate.",
+  "scope": "claims",
+  "k": 5,
+  "cases": [
+    {
+      "id": "nl-1",
+      "type": "natural-language",
+      "query": "How does RateGuard store per-client rate counters?",
+      "expectAnyOf": [
+        "clm_5e3fe6f8db369532"
+      ]
+    },
+    {
+      "id": "nl-2",
+      "type": "natural-language",
+      "query": "Why was Redis chosen as the counter store?",
+      "expectAnyOf": [
+        "clm_0e46ae81bdf5fa3c"
+      ]
+    },
+    {
+      "id": "nl-3",
+      "type": "natural-language",
+      "query": "What is the default request rate limit per client?",
+      "expectAnyOf": [
+        "clm_20e5846f3d00bec6",
+        "clm_ba0a11995afc89d8"
+      ]
+    },
+    {
+      "id": "nl-4",
+      "type": "natural-language",
+      "query": "How do clients authenticate with the API?",
+      "expectAnyOf": [
+        "clm_36cfb9f6ac6d72c5"
+      ]
+    },
+    {
+      "id": "nl-5",
+      "type": "natural-language",
+      "query": "When do monitoring alerts fire for rejected requests?",
+      "expectAnyOf": [
+        "clm_bb92b1744d8314f4"
+      ]
+    },
+    {
+      "id": "kw-1",
+      "type": "keyword",
+      "query": "fifty items",
+      "expectAnyOf": [
+        "clm_4456aebfa2e7a0be"
+      ]
+    },
+    {
+      "id": "kw-2",
+      "type": "keyword",
+      "query": "burst credits",
+      "expectAnyOf": [
+        "clm_b818b407b87ec929"
+      ]
+    },
+    {
+      "id": "phrase-1",
+      "type": "phrase",
+      "query": "Retry-After header",
+      "expectAnyOf": [
+        "clm_a1afd01dbc173d1d"
+      ]
+    }
+  ],
+  "categoryNote": "Category queries (eval run 1, finding 1). These go through askContext with a --claim-type SELECTOR, not search(): the question deliberately shares NO vocabulary with the claim texts, so a term-only path returns nothing. They are kept OUT of `cases` so the 7/8 recall gate arithmetic is unchanged.",
+  "categoryCases": [
+    {
+      "id": "cat-1",
+      "claimType": "open_question",
+      "query": "what open questions remain about rate limiting?",
+      "expectAll": [
+        "clm_b818b407b87ec929",
+        "clm_cd88de4eb8add55a"
+      ]
+    },
+    {
+      "id": "cat-2",
+      "claimType": "open_question",
+      "query": "enumerate every unresolved decision",
+      "expectAll": [
+        "clm_b818b407b87ec929",
+        "clm_cd88de4eb8add55a"
+      ]
+    }
+  ]
+}

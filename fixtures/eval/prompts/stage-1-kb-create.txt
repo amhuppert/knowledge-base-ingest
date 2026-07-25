@@ -1,0 +1,1 @@
+Build a knowledge base at ./eval-kb from the four documents in fixtures/corpus/sources, organized by topic.

@@ -1,0 +1,75 @@
+{
+  "source_id": "src_faa820ed6c8baf41",
+  "claims": [
+    {
+      "node_id": "nod_f65f68035da154c1",
+      "text": "The token store keeps per-client counters in Redis.",
+      "claim_type": "fact",
+      "confidence": 0.9,
+      "spans": [
+        {
+          "chunk_id": "chk_a0ef4aac81268dc0",
+          "quote": "The token store keeps per-client counters in Redis for low-latency reads",
+          "role": "supports",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "node_id": "nod_563124d170a8508c",
+      "text": "Redis was chosen for its atomic increment operations.",
+      "claim_type": "decision",
+      "confidence": 0.9,
+      "spans": [
+        {
+          "chunk_id": "chk_a0ef4aac81268dc0",
+          "quote": "Redis was chosen for its atomic increment operations",
+          "role": "supports",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "node_id": "nod_23b022cb91d8fa3b",
+      "text": "RateGuard uses a token-bucket algorithm.",
+      "claim_type": "decision",
+      "confidence": 0.9,
+      "spans": [
+        {
+          "chunk_id": "chk_4fdda0c91f03a546",
+          "quote": "RateGuard uses a token-bucket algorithm to smooth bursts",
+          "role": "supports",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "node_id": "nod_23b022cb91d8fa3b",
+      "text": "The default rate limit is 100 requests per second.",
+      "claim_type": "constraint",
+      "confidence": 0.9,
+      "spans": [
+        {
+          "chunk_id": "chk_4fdda0c91f03a546",
+          "quote": "The default rate limit is 100 requests per second",
+          "role": "supports",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "node_id": "nod_143c4c1f954e0937",
+      "text": "Rejected requests return a 429 status with a Retry-After header.",
+      "claim_type": "fact",
+      "confidence": 0.9,
+      "spans": [
+        {
+          "chunk_id": "chk_a776dfc9048d0567",
+          "quote": "Rejected requests return a 429 status with a Retry-After header",
+          "role": "supports",
+          "confidence": 0.9
+        }
+      ]
+    }
+  ]
+}

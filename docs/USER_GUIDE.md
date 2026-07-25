@@ -47,7 +47,7 @@ commands, which validate everything (especially that quotes are real) before sav
 
 ```bash
 pnpm install          # builds the native better-sqlite3 module
-pnpm test             # optional: 98 tests should pass
+pnpm test             # optional: the full suite should pass
 ```
 
 The CLI runs without a build step via `./bin/kb` (it uses `tsx`). Point it at a knowledge base
@@ -131,54 +131,1125 @@ export KB_DIR="$(pwd)/my-kb"
 
 ## 6. CLI reference
 
-Every command accepts `--json` (machine output) and `--kb <dir>`. Output envelope:
-`{ ok, data, warnings, errors }`; exit code is `1` when `ok:false`. JSON payloads for the
-`apply`/`synthesize`/`answer-check` commands are read from `--file <path>` **or** stdin.
+Discover the surface from the tool, not from this page: `./bin/kb --help --json` lists
+every command with its workflow group, `./bin/kb <command> --help --json` prints one
+command's full contract (arguments, flags, payload example, output, side effects), and
+`./bin/kb version --json` reports the CLI and schema versions.
 
-### Lifecycle & status
-| Command | Purpose |
-|---|---|
-| `kb init [<dir>]` | Create a KB (DB, `sources/`, `kb/`, `AGENTS.md`/`CLAUDE.md`, initial render). Idempotent. |
-| `kb status` | Counts: sources, chunks, nodes, stale nodes, claims, spans, entities, relationships. |
+The reference below is generated from exactly those calls. Regenerate it with
+`pnpm docs:commands` (or `pnpm docs`, which also rebuilds `docs/index.html`); a test
+fails if it drifts.
 
-### Sources
-| Command | Purpose |
-|---|---|
-| `kb ingest <path> [--title T] [--source-date D] [--supersedes <src_id>]` | Register + chunk a source. Re-ingesting identical bytes is a no-op. `--supersedes` marks an older version superseded. |
-| `kb source show <source_id>` | Source metadata. |
-| `kb source chunks <source_id>` | All chunks with full text (this is how you find exact quotes). |
+<!-- generated:commands:start -->
 
-### Synthesis tree
-| Command | Purpose |
-|---|---|
-| `kb node create --title T --kind <root\|topic\|leaf> [--parent <node_id>] [--slug S]` | Create a node. One `root`; others need `--parent`. |
-| `kb node tree` | The whole hierarchy with depth, kind, stale flag, claim counts. |
-| `kb node show <node_id>` | A node plus the claims it owns (with their ids — needed for citations). |
-| `kb synthesize --file <json>` | Set a node's prose. Clears its stale flag. Rejects citations to unknown claims. |
-| `kb propagate` | Re-assert staleness propagation (every stale node marks its ancestors stale). |
+Generated from the CLI by `pnpm docs:commands` — do not edit this block by hand.
 
-### Claims & graph
-| Command | Purpose |
-|---|---|
-| `kb claim apply --file <json>` | Persist claims with quote-verified provenance (atomic). |
-| `kb claim conflict <claim_id> [<claim_id> ...]` | Mark unresolved claims conflicted; marks owning nodes stale and surfaces them in `open-questions.md`. |
-| `kb claim supersede <old_claim_id> --by <new_claim_id>` | Mark a claim superseded; marks affected nodes stale. |
-| `kb graph apply --file <json>` | Persist entities + relationships with provenance (atomic). |
+Every command accepts `--json` (the envelope `{ ok, data, issues, errors, warnings, nextActions, hints }`)
+and `--kb <dir>`. Exit code is `1` when `ok:false`. `--dry-run` is accepted by exactly 5
+commands: `kb claim apply`, `kb graph apply`, `kb ingest`, `kb node apply`, `kb synthesize`.
 
-### Read, verify, render
-| Command | Purpose |
+Start here: `kb init --json`. Workflow order: **setup** → **ingest** → **structure** → **extract** → **synthesize** → **query** → **maintain**.
+
+### setup — Create and open the knowledge base
+
+#### `kb init`
+
+Create or open a KB root, write scaffold files, and render the initial markdown.
+
+```text
+kb init [dir]
+```
+
+*When:* The very first step: create the knowledge base.
+
+| Argument | Description |
 |---|---|
-| `kb search <query> [--scope chunks\|claims\|nodes\|entities\|all] [--limit N]` | Full-text search. |
-| `kb ask-context "<question>" [--limit N]` | Retrieve relevant claims **with provenance**, plus related nodes/entities. The basis for answering. |
-| `kb answer-check --file <json>` | Validate a drafted answer's citations (structural). |
-| `kb provenance <claim_id>` | Full provenance chain for a claim (quotes, offsets, source, stored path). |
-| `kb entity show <entity_id>` | An entity and its relationships. |
-| `kb verify [--strict]` | Run provenance/structure invariants (see §11). |
-| `kb render [--check]` | Write `kb/*.md`, or with `--check` detect drift without writing. |
+| `dir` | the KB directory (defaults to the current directory) |
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+
+**Output**
+
+- root
+- created
+- scaffold (files written)
+- rendered (files count)
+
+**Side effects**
+
+- creates the KB directory + sqlite DB
+- writes scaffold + initial rendered markdown
+
+**Examples**
+
+```bash
+# Initialize a KB here
+kb init --json
+```
+
+*Related:* `kb ingest` · `kb status`
+
+### ingest — Register sources and read their chunks
+
+#### `kb ingest`
+
+Register an immutable source copy, normalize text, and create deterministic chunks.
+
+```text
+kb ingest [options] <path>
+```
+
+*When:* The first step: ingest a source, then read its chunks and extract claims.
+
+| Argument | Description |
+|---|---|
+| `path` | the ORIGINAL file to ingest (it owns source identity) |
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+| `--dry-run` | preview the change without persisting |
+| `--title <title>` | source title (defaults to the first heading or filename) |
+| `--source-date <date>` | source authorship date |
+| `--supersedes <src_id>` | the source id this ingest supersedes |
+| `--text-from <path>` | sidecar file supplying the canonical text for this original |
+| `--extractor <name/version>` | how the sidecar text was produced (default agent-transcription/1) |
+| `--verification <mode>` | whether the transcription was checked against the original (one of: `visual`, `none`) |
+| `--origin-system <system>` | the system this source came from, e.g. github, notion |
+| `--origin-id <id>` | the source’s id in that system |
+| `--origin-url <url>` | the source’s canonical URL in that system |
+
+**Input**
+
+```text
+accepted formats (extension → media type):
+  md, markdown → text/markdown
+  txt, rst → text/plain
+  html, htm → text/html
+  csv → text/csv
+  json → application/json
+  pdf → application/pdf — requires --text-from
+  docx → application/vnd.openxmlformats-officedocument.wordprocessingml.document — requires --text-from
+  pptx → application/vnd.openxmlformats-officedocument.presentationml.presentation — requires --text-from
+  xlsx → application/vnd.openxmlformats-officedocument.spreadsheetml.sheet — requires --text-from
+  png → image/png — requires --text-from
+  jpg, jpeg → image/jpeg — requires --text-from
+  gif → image/gif — requires --text-from
+  zip → application/zip — requires --text-from
+  any other extension → text/plain when it decodes as UTF-8 (no sidecar needed), else application/octet-stream — requires --text-from
+for a format that requires --text-from, transcribe or extract the text first, then:
+  1. write the extracted text to a UTF-8 file, e.g. extracted.md
+  2. kb ingest report.pdf --text-from extracted.md --json
+the ORIGINAL bytes own source identity (id + sha256); the sidecar becomes the canonical text.
+canonical text is immutable: to publish a corrected transcription, ingest the corrected file itself
+  with --supersedes <src_id> — re-ingesting the same original with different text is rejected.
+```
+
+**Output**
+
+- sourceId
+- title
+- status
+- updated
+- chunks (count)
+- original: { mediaType, byteSize, sha256 } — the bytes that own source identity
+- text: { extractor, verification, textHash } — the canonical-text lineage
+- next (a source-chunks pointer)
+
+**Side effects**
+
+- stores an immutable copy of the source
+- creates deterministic chunks
+
+*atomic (one transaction; all-or-nothing) · supports `--dry-run`*
+
+**Examples**
+
+```bash
+# Ingest a markdown file
+kb ingest ./notes.md --json
+```
+
+*Related:* `kb source chunks` · `kb claim apply`
+
+#### `kb source chunks`
+
+List chunks with ids, heading paths, and exact text for quote selection.
+
+```text
+kb source chunks <source_id>
+```
+
+*When:* Read chunk text to copy exact quotes into a claim/graph payload.
+
+| Argument | Description |
+|---|---|
+| `source_id` | the source id (src_…) whose chunks to list |
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+
+**Output**
+
+- sourceId
+- chunks: [{ id, chunkIndex, headingPath, text }] — copy quotes verbatim from text
+
+**Examples**
+
+```bash
+# List a source’s chunks
+kb source chunks src_1a2b3c --json
+```
+
+*Related:* `kb source show` · `kb claim apply`
+
+#### `kb source list`
+
+List sources with chunk and claim counts, plus global per-status totals.
+
+```text
+kb source list [options]
+```
+
+*When:* Survey ingested sources and their extraction coverage.
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+| `--status <status>` | filter the list by source status (one of: `active`, `superseded`, `duplicate`, `retracted`) |
+
+**Output**
+
+- sources: [{ id, title, status, sourceDate, mediaType, chunks, claims, origin, ingestedAt }] ordered by (ingestedAt, id)
+- counts: GLOBAL per-status source totals, unaffected by --status
+
+**Examples**
+
+```bash
+# List all sources
+kb source list --json
+
+# List only active sources
+kb source list --status active --json
+```
+
+*Related:* `kb source show` · `kb source chunks`
+
+#### `kb source show`
+
+Show source metadata.
+
+```text
+kb source show <source_id>
+```
+
+*When:* Inspect an ingested source before extracting claims from it.
+
+| Argument | Description |
+|---|---|
+| `source_id` | the source id (src_…) to show |
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+
+**Output**
+
+- the full source row: id, title, status, mediaType, sourceDate, ingestedAt, storedPath, metadataJson
+- origin: { system, url } from metadata.origin — null when no origin was recorded
+
+**Examples**
+
+```bash
+# Show one source
+kb source show src_1a2b3c --json
+```
+
+*Related:* `kb source list` · `kb source chunks`
+
+### structure — Build the synthesis hierarchy
+
+#### `kb node apply`
+
+Create a whole node hierarchy from a manifest, atomically.
+
+```text
+kb node apply [options]
+```
+
+*When:* Stand up the synthesis hierarchy in one command before extracting claims into it.
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+| `--dry-run` | preview the change without persisting |
+| `--file <path>` | hierarchy manifest file (defaults to stdin; - for stdin) |
+
+**Input**
+
+```json
+{
+  "nodes": [
+    {
+      "ref": "root",
+      "title": "Knowledge Base",
+      "kind": "root",
+      "children": [
+        {
+          "ref": "caching",
+          "title": "Caching",
+          "kind": "leaf"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Output**
+
+- nodes: [{ ref, nodeId, outcome }]
+- totals { created, existing }
+- staleNodes
+
+**Side effects**
+
+- creates the manifest nodes in one transaction (parents before children)
+- marks created nodes and their ancestors stale
+
+*atomic (one transaction; all-or-nothing) · supports `--dry-run`*
+
+**Examples**
+
+```bash
+# Preview a hierarchy manifest
+kb node apply --file ./hierarchy.json --dry-run --json
+
+# Apply a hierarchy manifest
+kb node apply --file ./hierarchy.json --json
+```
+
+*Related:* `kb node create` · `kb node tree` · `kb claim apply`
+
+#### `kb node create`
+
+Create a synthesis node.
+
+```text
+kb node create [options]
+```
+
+*When:* Build the synthesis hierarchy that claims are attached to.
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+| `--title <title>` | node title |
+| `--kind <kind>` | node kind (one of: `root`, `topic`, `leaf`) |
+| `--parent <node_id>` | parent node id (omit or "root" for the root) |
+| `--slug <slug>` | explicit slug (defaults to a slugified title) |
+
+**Output**
+
+- nodeId
+- created
+- kind
+- depth
+
+**Side effects**
+
+- creates a node in the synthesis hierarchy
+
+*atomic (one transaction; all-or-nothing)*
+
+**Examples**
+
+```bash
+# Create the root node
+kb node create --title "KB" --kind root --json
+
+# Create a leaf under the root
+kb node create --title "Caching" --kind leaf --json
+```
+
+*Related:* `kb node tree` · `kb claim apply`
+
+#### `kb node show`
+
+Show a node and the claims it owns.
+
+```text
+kb node show [options] <node_id>
+```
+
+*When:* Inspect a node’s claims before synthesizing its prose; --context returns everything one synthesize write needs.
+
+| Argument | Description |
+|---|---|
+| `node_id` | the node id (nod_…) to show |
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+| `--context` | return the synthesis-ready bundle for the node’s whole subtree |
+
+**Output**
+
+- node, claims owned by the node (with ids to cite during synthesis)
+- --context: node (bodyMd + bodyHash included), children [{…, ownClaims: citable claims owned directly}], claims (the whole subtree, active + conflicted, owner-tagged, each with provenance snippets), sources [{ id, title, claimCount: bundle claims quoting it }], allowedCitationIds, stats { descendantNodes, claims, approxTokens, complete }
+
+**Examples**
+
+```bash
+# Show a node and its claims
+kb node show nod_1a2b3c --json
+
+# Read the synthesis bundle for a node
+kb node show nod_1a2b3c --context --json
+```
+
+*Related:* `kb node tree` · `kb synthesize` · `kb provenance`
+
+#### `kb node tree`
+
+List the synthesis hierarchy with depth, kind, stale flag, and claim counts.
+
+```text
+kb node tree
+```
+
+*When:* See the whole hierarchy and which nodes are stale.
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+
+**Output**
+
+- nodes: [{ id, parentId, title, kind, depth, isStale, claims (count) }]
+
+**Examples**
+
+```bash
+# List the hierarchy
+kb node tree --json
+```
+
+*Related:* `kb node show` · `kb node create`
+
+### extract — Extract claims and the knowledge graph
+
+#### `kb claim apply`
+
+Persist quote-verified claims atomically.
+
+```text
+kb claim apply [options]
+```
+
+*When:* Extract claims from a source’s chunks and attach them to nodes.
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+| `--dry-run` | preview the change without persisting |
+| `--file <path>` | claims payload file (defaults to stdin; - for stdin) |
+
+**Input**
+
+```json
+{
+  "source_id": "src_1a2b3c",
+  "claims": [
+    {
+      "node_id": "nod_1a2b3c",
+      "text": "The service is written in Rust.",
+      "claim_type": "fact",
+      "spans": [
+        {
+          "chunk_id": "chk_1a2b3c",
+          "quote": "written in Rust"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Output**
+
+- claims[] — one receipt per input: {inputIndex, claimId, outcome (created|updated|unchanged), spans:{submitted, spansCreated, spansReused, linksCreated, linksReused}}; per input spansCreated + spansReused === submitted (same for links)
+- totals — {created, updated, unchanged, spansCreated, spansReused, linksCreated, linksReused, linksUpdated} summed over the inputs (linksUpdated counts reused links whose role or confidence changed)
+- staleNodes — the currently-stale node ids, deepest-first (only owners of created/updated claims are staled)
+- claimsCreated, claimsUpdated, affectedNodes, spansCreatedNet — deprecated aliases kept for envelope v2; read claims[]/totals instead
+
+**Side effects**
+
+- persists created/updated claims and their quote-verified spans
+- marks the owning nodes (and ancestors) of created/updated claims stale
+- writes one changelog entry iff created + updated > 0 — an exact repeat writes nothing at all
+
+*atomic (one transaction; all-or-nothing) · supports `--dry-run`*
+
+**Examples**
+
+```bash
+# Apply a claims payload
+kb claim apply --file ./claims.json --json
+```
+
+*Related:* `kb source chunks` · `kb node show`
+
+#### `kb claim conflict`
+
+Mark one or more unresolved claims as conflicted and stale their owning nodes.
+
+```text
+kb claim conflict <claim_id...>
+```
+
+*When:* Flag contradictory claims so their nodes get re-synthesized.
+
+| Argument | Description |
+|---|---|
+| `claim_id` | one or more claim ids (clm_…) to mark conflicted |
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+
+**Output**
+
+- conflicted (the claim ids)
+- staleNodes (count marked stale)
+
+**Side effects**
+
+- sets the claims to conflicted
+- marks owning nodes (and ancestors) stale
+
+*atomic (one transaction; all-or-nothing)*
+
+**Examples**
+
+```bash
+# Conflict two claims
+kb claim conflict clm_1a2b3c clm_4d5e6f --json
+```
+
+*Related:* `kb claim supersede` · `kb node show`
+
+#### `kb claim supersede`
+
+Mark an older claim superseded by another claim and stale affected nodes.
+
+```text
+kb claim supersede [options] <old_claim_id>
+```
+
+*When:* Retire an outdated claim in favor of a newer one.
+
+| Argument | Description |
+|---|---|
+| `old_claim_id` | the claim id (clm_…) being superseded |
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+| `--by <new_claim_id>` | the superseding claim id |
+
+**Output**
+
+- superseded (the old claim id)
+- by (the new claim id)
+- staleNodes (count marked stale)
+
+**Side effects**
+
+- sets the old claim to superseded
+- marks affected nodes (and ancestors) stale
+
+*atomic (one transaction; all-or-nothing)*
+
+**Examples**
+
+```bash
+# Supersede a claim
+kb claim supersede clm_1a2b3c --by clm_4d5e6f --json
+```
+
+*Related:* `kb claim conflict` · `kb provenance`
+
+#### `kb entity list`
+
+List knowledge-graph entities with their relationship counts.
+
+```text
+kb entity list [options]
+```
+
+*When:* Survey the knowledge graph after graph apply, then inspect one entity.
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+| `--type <type>` | filter the list to one entity type |
+
+**Output**
+
+- entities: [{ id, type, canonicalName, description, relationships }] ordered by (type, canonicalName)
+- counts: GLOBAL per-type entity totals, unaffected by --type
+
+**Examples**
+
+```bash
+# List every entity
+kb entity list --json
+
+# List only data stores
+kb entity list --type DataStore --json
+```
+
+*Related:* `kb entity show` · `kb graph apply` · `kb search`
+
+#### `kb entity show`
+
+Show an entity and its relationships.
+
+```text
+kb entity show <entity_id>
+```
+
+*When:* Inspect the knowledge graph after graph apply.
+
+| Argument | Description |
+|---|---|
+| `entity_id` | the entity id (ent_…) to show |
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+
+**Output**
+
+- entity
+- relationships owned by the entity
+
+**Examples**
+
+```bash
+# Show one entity
+kb entity show ent_1a2b3c --json
+```
+
+*Related:* `kb graph apply` · `kb search`
+
+#### `kb graph apply`
+
+Persist entities and quote-verified relationships atomically.
+
+```text
+kb graph apply [options]
+```
+
+*When:* Extract the knowledge graph from a source alongside its claims.
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+| `--dry-run` | preview the change without persisting |
+| `--file <path>` | graph payload file (defaults to stdin; - for stdin) |
+
+**Input**
+
+```json
+{
+  "source_id": "src_1a2b3c",
+  "entities": [
+    {
+      "type": "Service",
+      "name": "Billing"
+    }
+  ],
+  "relationships": [
+    {
+      "type": "depends_on",
+      "subject": {
+        "type": "Service",
+        "name": "Billing"
+      },
+      "object": {
+        "type": "Service",
+        "name": "Auth"
+      },
+      "evidence": [
+        {
+          "chunk_id": "chk_1a2b3c",
+          "quote": "Billing calls Auth"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Output**
+
+- entities[] — one receipt per input entity: {inputIndex, entityId, outcome (created|updated|unchanged)}
+- relationships[] — one receipt per input relationship: {inputIndex, relationshipId, outcome, evidence:{submitted, spansCreated, spansReused, linksCreated, linksReused}}; per relationship spansCreated + spansReused === submitted (same for links)
+- totals — {entitiesCreated, entitiesUpdated, entitiesUnchanged, entitiesReferenced, relationshipsCreated, relationshipsUpdated, relationshipsUnchanged, spansCreated, spansReused, linksCreated, linksReused}
+- entitiesCreated, entitiesUpdated, entitiesUnchanged, entitiesReferenced, relationshipsCreated, relationshipsUpdated, relationshipsUnchanged, spansCreated — deprecated aliases kept for envelope v2; read entities[]/relationships[]/totals instead
+- no stale-node field: graph mutations never mark nodes stale
+
+**Side effects**
+
+- persists created/updated entities
+- persists created/updated relationships and their quote-verified evidence spans
+- writes one changelog entry iff created + updated > 0 — an exact repeat writes nothing at all
+
+*atomic (one transaction; all-or-nothing) · supports `--dry-run`*
+
+**Examples**
+
+```bash
+# Apply a graph payload
+kb graph apply --file ./graph.json --json
+```
+
+*Related:* `kb entity show` · `kb source chunks`
+
+### synthesize — Write node prose that cites claims
+
+#### `kb synthesize`
+
+Set node prose with inline claim citations and clear that node stale flag.
+
+```text
+kb synthesize [options]
+```
+
+*When:* Write node prose citing active claims after claims are applied.
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+| `--dry-run` | preview the change without persisting |
+| `--file <path>` | node payload file (defaults to stdin; - for stdin) |
+
+**Input**
+
+```json
+{
+  "node_id": "nod_1a2b3c",
+  "title": "Caching strategy",
+  "body_md": "The service caches responses for 60s [^clm_1a2b3c]."
+}
+```
+
+**Output**
+
+- single payload: nodeId, outcome (updated | unchanged | stale-cleared)
+- batch payload: nodes[] (inputIndex, nodeId, depth, outcome) in apply order + totals
+- staleNodes (nodes still needing synthesis, deepest-first)
+
+**Side effects**
+
+- sets the node prose (body, and title/summary when provided)
+- clears the node stale flag
+- marks ancestor nodes stale when the title or summary changes (a body-only change does not)
+
+*atomic (one transaction; all-or-nothing) · supports `--dry-run`*
+
+**Examples**
+
+```bash
+# Synthesize one node from a file
+kb synthesize --file ./node.json --json
+
+# Synthesize a batch — {"nodes":[<payload>, …]}, up to 200, applied deepest-first in one transaction
+kb synthesize --file ./batch.json --dry-run --json
+```
+
+*Related:* `kb node show` · `kb verify`
+
+### query — Search and answer with provenance
+
+#### `kb answer-check`
+
+Structurally validate that a drafted answer cites supported active claims.
+
+```text
+kb answer-check [options]
+```
+
+*When:* Validate a drafted answer’s citations before finalizing it.
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+| `--file <path>` | answer payload file (defaults to stdin; - for stdin) |
+
+**Input**
+
+```json
+{
+  "answer": "The service is written in Rust [^clm_1a2b3c].",
+  "claim_ids": [
+    "clm_1a2b3c"
+  ]
+}
+```
+
+**Output**
+
+- ok (mirrors envelope ok)
+- citedClaims / unknownCitations / inactiveCitations
+- uncited: [{ text, line }] (uncitedSentences retained as a deprecated alias)
+
+**Examples**
+
+```bash
+# Check an answer
+kb answer-check --file ./answer.json --json
+```
+
+*Related:* `kb ask-context` · `kb provenance`
+
+#### `kb ask-context`
+
+Retrieve relevant claims with provenance, plus related nodes and entities.
+
+```text
+kb ask-context [options] <question...>
+```
+
+*When:* Gather cited context before drafting an answer.
+
+| Argument | Description |
+|---|---|
+| `question` | the question (joined with spaces) |
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+| `--limit <n>` | max claims (1–50) |
+| `--claim-type <type>` | restrict claims to this type (one of: `fact`, `definition`, `decision`, `requirement`, `constraint`, `procedure`, `warning`, `example`, `open_question`) |
+| `--node <node_id>` | restrict claims to this node’s subtree |
+
+**Output**
+
+- claims with provenance
+- related nodes
+- related entities
+- applied: the { claimType, node } filters echoed back
+
+**Examples**
+
+```bash
+# Ask for context
+kb ask-context how does caching work --json
+
+# Only open questions
+kb ask-context caching --claim-type open_question --json
+```
+
+*Related:* `kb search` · `kb answer-check`
+
+#### `kb provenance`
+
+Show a claim and its source quotes, offsets, source titles, and stored paths.
+
+```text
+kb provenance <claim_id>
+```
+
+*When:* Trace a claim back to its exact source quotes.
+
+| Argument | Description |
+|---|---|
+| `claim_id` | the claim id (clm_…) whose provenance to show |
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+
+**Output**
+
+- claim
+- provenance: [{ quote, charStart, charEnd, sourceTitle, storedPath }]
+
+**Examples**
+
+```bash
+# Show a claim’s provenance
+kb provenance clm_1a2b3c --json
+```
+
+*Related:* `kb node show` · `kb source show`
+
+#### `kb search`
+
+Search chunks, claims, nodes, entities, or all scopes.
+
+```text
+kb search [options] <query...>
+```
+
+*When:* Find ids to inspect, cite, or answer from.
+
+| Argument | Description |
+|---|---|
+| `query` | the search terms (joined with spaces) |
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+| `--scope <scope>` | search scope (one of: `chunks`, `claims`, `nodes`, `entities`, `all`) |
+| `--match <mode>` | match strategy (one of: `auto`, `all`, `any`, `phrase`) |
+| `--limit <n>` | max hits per scope (1–200) |
+
+**Output**
+
+- query (the joined terms)
+- matchModes (strategy applied per scope: all | any | any-fallback | phrase | like)
+- hits scope-major (chunks, claims, nodes, entities), each with id, matchMode, and rank (raw bm25; null for entity hits; comparable only within a scope)
+
+**Examples**
+
+```bash
+# Search all scopes (auto AND→OR fallback)
+kb search caching layer --json
+
+# Require every term (strict)
+kb search caching layer --match all --json
+
+# Search only claims
+kb search caching --scope claims --json
+```
+
+*Related:* `kb ask-context` · `kb node show`
+
+### maintain — Inspect, verify, and render
+
+#### `kb coverage`
+
+Report synthesis completeness gaps across sources, chunks, claims, and nodes.
+
+```text
+kb coverage
+```
+
+*When:* Survey synthesis completeness after verify; descriptive, never an integrity gate.
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+
+**Output**
+
+- summary: per-check { total, shown } for SOURCE_NO_CLAIMS, CHUNK_UNCITED, CLAIM_NOT_SYNTHESIZED, NODE_SINGLE_SOURCE, OPEN_QUESTION_NOT_SYNTHESIZED
+- issues: one aggregated info issue per non-empty check (ids capped at 20; exact totals in summary)
+
+**Examples**
+
+```bash
+# Report coverage
+kb coverage --json
+```
+
+*Related:* `kb verify` · `kb render`
+
+#### `kb propagate`
+
+Re-assert stale propagation from stale nodes to ancestors.
+
+```text
+kb propagate
+```
+
+*When:* Recompute staleness if the hierarchy was edited out of band.
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+
+**Output**
+
+- propagated stale set (nodes marked stale by ancestor propagation)
+
+**Side effects**
+
+- marks ancestors of stale nodes stale
+
+*atomic (one transaction; all-or-nothing)*
+
+**Examples**
+
+```bash
+# Re-assert staleness
+kb propagate --json
+```
+
+*Related:* `kb node tree` · `kb verify`
+
+#### `kb render`
+
+Render generated markdown, or check rendered markdown for drift.
+
+```text
+kb render [options]
+```
+
+*When:* Regenerate the human-readable markdown after verify.
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+| `--check` | check rendered markdown for drift instead of writing |
+
+**Output**
+
+- written (files) when rendering
+- checked + drift (list) with --check
+
+**Side effects**
+
+- writes generated markdown (without --check)
+
+**Examples**
+
+```bash
+# Render the markdown
+kb render --json
+
+# Check for render drift
+kb render --check --json
+```
+
+*Related:* `kb verify` · `kb status`
+
+#### `kb status`
+
+Print source, chunk, node, stale-node, claim, span, entity, and relationship counts.
+
+```text
+kb status
+```
+
+*When:* Check KB contents and the tool/schema versions at a glance.
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+
+**Output**
+
+- root
+- cli + schema (version fields)
+- counts: sources, chunks, nodes, staleNodes, claims, spans, entities, relationships
+
+**Examples**
+
+```bash
+# Show KB status
+kb status --json
+```
+
+*Related:* `kb node tree` · `kb verify`
+
+#### `kb verify`
+
+Run provenance, citation, staleness, and FTS integrity checks.
+
+```text
+kb verify [options]
+```
+
+*When:* Gate integrity before rendering; --strict fails on warnings.
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+| `--strict` | treat warnings as failures |
+
+**Output**
+
+- findings: [{ check, code, severity, message, ids }]
+
+**Examples**
+
+```bash
+# Verify integrity
+kb verify --json
+
+# Fail on any warning
+kb verify --strict --json
+```
+
+*Related:* `kb render` · `kb node tree`
+
+<!-- generated:commands:end -->
 
 ---
 
 ## 7. JSON payload formats
+
+The authoritative shape of every payload is `kb <command> --help --json` → `data.input`
+(a runnable `example`, plus notes). This section adds the judgment the help cannot: which
+values to choose and why.
 
 ### `claim apply`
 The agent supplies a `chunk_id` and an **exact** `quote` (a verbatim substring of that

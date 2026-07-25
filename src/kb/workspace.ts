@@ -9,6 +9,7 @@ import { IngestService } from '../domain/services/ingestService.js';
 import { ClaimService } from '../domain/services/claimService.js';
 import { GraphService } from '../domain/services/graphService.js';
 import { NodeService } from '../domain/services/nodeService.js';
+import { DomainIssueError } from '../domain/issueCodes.js';
 
 export const DB_FILENAME = 'kb.sqlite';
 
@@ -29,9 +30,9 @@ export interface Workspace {
  * Find the KB root: an explicit dir, else the `KB_DIR` env var, else walk up from
  * `cwd` looking for a `kb.sqlite`, else `cwd`.
  */
-export function resolveKbRoot(cwd: string, explicit?: string): string {
-  if (explicit) return resolve(explicit);
-  if (process.env.KB_DIR) return resolve(process.env.KB_DIR);
+export function resolveKbRoot(cwd: string, explicit?: string, env: NodeJS.ProcessEnv = process.env): string {
+  if (explicit) return resolve(cwd, explicit);
+  if (env.KB_DIR) return resolve(cwd, env.KB_DIR);
   let dir = resolve(cwd);
   for (;;) {
     if (existsSync(join(dir, DB_FILENAME))) return dir;
@@ -80,7 +81,11 @@ function build(root: string, db: Db, now: () => string): Workspace {
 export function openWorkspace(root: string, now: () => string = systemClock): Workspace {
   const dbPath = join(root, DB_FILENAME);
   if (!existsSync(dbPath)) {
-    throw new Error(`No knowledge base at ${root} (missing ${DB_FILENAME}). Run "kb init" first.`);
+    // A coded diagnostic, not a bare Error: the CLI maps it to the `NO_KB` issue (and its
+    // registry hint) by CODE (01 §1.4) — never by matching this message text.
+    throw new DomainIssueError('NO_KB', `No knowledge base at ${root} (missing ${DB_FILENAME}). Run "kb init" first.`, {
+      ids: [root],
+    });
   }
   const db = openDb(dbPath);
   assertSchemaCompatible(db);

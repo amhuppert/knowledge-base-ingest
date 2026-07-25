@@ -1,0 +1,61 @@
+{
+  "source_id": "src_1b10eaa2e7f0d94a",
+  "claims": [
+    {
+      "node_id": "nod_23b022cb91d8fa3b",
+      "text": "The default rate limit is raised to 1000 requests per second.",
+      "claim_type": "decision",
+      "confidence": 0.9,
+      "spans": [
+        {
+          "chunk_id": "chk_413ef1362e06f96e",
+          "quote": "raise the default rate limit to 1000 requests per second",
+          "role": "supports",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "node_id": "nod_5cc3194ad86019ad",
+      "text": "It is unclear whether burst credits should roll over between windows.",
+      "claim_type": "open_question",
+      "confidence": 0.6,
+      "spans": [
+        {
+          "chunk_id": "chk_bf3e0e880bf4f038",
+          "quote": "it is still unclear whether burst credits should roll over between windows",
+          "role": "supports",
+          "confidence": 0.6
+        }
+      ]
+    },
+    {
+      "node_id": "nod_5cc3194ad86019ad",
+      "text": "It is undecided how to handle clients that share an IP address.",
+      "claim_type": "open_question",
+      "confidence": 0.6,
+      "spans": [
+        {
+          "chunk_id": "chk_bf3e0e880bf4f038",
+          "quote": "we have not decided how to handle clients that share an IP address",
+          "role": "supports",
+          "confidence": 0.6
+        }
+      ]
+    },
+    {
+      "node_id": "nod_201c9799ff3508df",
+      "text": "Alerts fire when the rejection rate exceeds five percent.",
+      "claim_type": "fact",
+      "confidence": 0.9,
+      "spans": [
+        {
+          "chunk_id": "chk_7bc02d8bd5de344b",
+          "quote": "Alerts fire when the rejection rate exceeds five percent",
+          "role": "supports",
+          "confidence": 0.9
+        }
+      ]
+    }
+  ]
+}

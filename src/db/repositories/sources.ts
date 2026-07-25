@@ -36,6 +36,39 @@ export class SourceRepo {
       .map((r) => SourceRow.parse(r));
   }
 
+  /** Chunk count per source id (sources with zero chunks are simply absent from the map). */
+  chunkCountsBySource(): Map<SourceId, number> {
+    const rows = this.db
+      .prepare('SELECT source_id AS sourceId, COUNT(*) AS n FROM source_chunks GROUP BY source_id')
+      .all() as Array<{ sourceId: string; n: number }>;
+    return new Map(rows.map((r) => [r.sourceId as SourceId, r.n]));
+  }
+
+  /**
+   * DISTINCT claim count per source id: claims with ≥1 span from the source, via the
+   * live `claim_spans → spans` join (02 §3). Sources with no claim links are absent.
+   */
+  distinctClaimCountsBySource(): Map<SourceId, number> {
+    const rows = this.db
+      .prepare(
+        `SELECT s.source_id AS sourceId, COUNT(DISTINCT cs.claim_id) AS n
+           FROM spans s JOIN claim_spans cs ON cs.span_id = s.id
+          GROUP BY s.source_id`,
+      )
+      .all() as Array<{ sourceId: string; n: number }>;
+    return new Map(rows.map((r) => [r.sourceId as SourceId, r.n]));
+  }
+
+  /** GLOBAL per-status source totals (statuses with zero sources are omitted). */
+  countByStatus(): Partial<Record<SourceStatus, number>> {
+    const rows = this.db
+      .prepare('SELECT status, COUNT(*) AS n FROM sources GROUP BY status')
+      .all() as Array<{ status: SourceStatus; n: number }>;
+    const counts: Partial<Record<SourceStatus, number>> = {};
+    for (const r of rows) counts[r.status] = r.n;
+    return counts;
+  }
+
   updateMeta(
     id: SourceId,
     patch: { title?: string; sourceDate?: string | null; author?: string | null; versionLabel?: string | null },
@@ -54,6 +87,16 @@ export class SourceRepo {
         author: patch.author ?? cur.author,
         versionLabel: patch.versionLabel ?? cur.versionLabel,
       });
+  }
+
+  /**
+   * Replace `metadata_json` wholesale (06 §2). The WRITE half of a read-modify-write:
+   * callers read the current metadata, merge under the §2 rules (extraction immutable,
+   * origin patch-merge, unknown keys preserved by the passthrough schema), and pass the
+   * complete serialized document here — so no merge policy leaks into the repo layer.
+   */
+  updateMetadata(id: SourceId, json: string): void {
+    this.db.prepare('UPDATE sources SET metadata_json = ? WHERE id = ?').run(json, id);
   }
 
   setStatus(id: SourceId, status: SourceStatus): void {

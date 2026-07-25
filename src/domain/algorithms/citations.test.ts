@@ -19,4 +19,16 @@ describe('extractCitations', () => {
     expect(hasCitation('a[^clm_abc123]')).toBe(true);
     expect(hasCitation('none')).toBe(false);
   });
+
+  // Regression (codex-review finding 32): a module-shared /g regex leaks
+  // `lastIndex` between calls. Calling hasCitation() first left lastIndex past
+  // the first match, so the subsequent matchAll in extractCitations skipped the
+  // earliest citation. Fixed here (Phase 0) with fresh/non-global regexes;
+  // asserted positively.
+  it('extractCitations is unaffected by a prior hasCitation call (reverse-call-order)', () => {
+    const body = 'Tokens rotate.[^clm_aaa] They expire.[^clm_bbb]';
+    expect(hasCitation(body)).toBe(true);
+    // Both ids must still be returned — the first must not be dropped.
+    expect(extractCitations(body)).toEqual(['clm_aaa', 'clm_bbb']);
+  });
 });

@@ -22,8 +22,26 @@ import { SpanRow } from '../db/rows.js';
 
 export type Severity = 'error' | 'warning';
 
+/**
+ * Every invariant this module can report. The list is the closed set of `check`
+ * names `verify()` emits; `src/cli/issues.ts` maps each to a stable issue code and
+ * a test asserts the map is total over this list.
+ */
+export const VERIFY_CHECKS = [
+  'claim-has-provenance',
+  'quote-matches-source',
+  'leaf-has-citation',
+  'citation-resolves',
+  'parent-cites-subtree',
+  'citation-active',
+  'no-stale-nodes',
+  'fts-integrity',
+] as const;
+
+export type VerifyCheck = (typeof VERIFY_CHECKS)[number];
+
 export interface VerifyFinding {
-  check: string;
+  check: VerifyCheck;
   severity: Severity;
   message: string;
   ids?: string[];
