@@ -17,3 +17,4 @@ dist/
 .playwright/
 .playwright-cli/
 .claude/skills/playwright-cli/
+.worktrees/
