@@ -10,7 +10,7 @@ import { codeForVerifyCheck, hintFor } from '../issues.js';
 import { bareAction, kbPathSuspectIssue, leaf, workspaceAction, type RunContext } from '../run.js';
 import { defineHelp } from '../help/spec.js';
 import { steeringFor } from '../steering.js';
-import { initWorkspace, kbRootWarnings, type Workspace } from '../../kb/workspace.js';
+import { initWorkspace, kbRootVia, kbRootWarnings, type Workspace } from '../../kb/workspace.js';
 import { writeScaffold } from '../../kb/scaffold.js';
 import { renderAll, writeRender, checkRender } from '../../render/render.js';
 import { verify } from '../../verify/verify.js';
@@ -76,7 +76,12 @@ export function registerOps(program: Command, ctx: RunContext): void {
     summary: 'Print source, chunk, node, stale-node, claim, span, entity, and relationship counts.',
     args: [],
     flags: [],
-    output: ['root', 'cli + schema (version fields)', 'counts: sources, chunks, nodes, staleNodes, claims, spans, entities, relationships'],
+    output: [
+      'root',
+      'resolvedVia: how the root was resolved (flag | env | walk-up)',
+      'cli + schema (version fields)',
+      'counts: sources, chunks, nodes, staleNodes, claims, spans, entities, relationships',
+    ],
     sideEffects: [],
     atomic: false,
     supportsDryRun: false,
@@ -84,9 +89,10 @@ export function registerOps(program: Command, ctx: RunContext): void {
     related: ['node tree', 'verify'],
     examples: [{ description: 'Show KB status', command: 'kb status --json' }],
   }).action(
-    workspaceAction(ctx, (ws) =>
+    workspaceAction(ctx, (ws, { opts }) =>
       success({
         root: ws.root,
+        resolvedVia: kbRootVia(opts['kb'] as string | undefined, ctx.io.env),
         cli: cliVersion(),
         schema: { supported: currentSchemaVersion(), onDisk: readSchemaVersion(ws.db) },
         sources: count(ws, 'sources'),

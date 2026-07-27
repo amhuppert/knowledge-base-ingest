@@ -20,8 +20,8 @@ import { allowedCitations } from './synthesisValidator.js';
 /** Quote snippets are whitespace-collapsed and cut at this length, with `…` appended. */
 export const SNIPPET_MAX_CHARS = 160;
 
-/** The repository surface the bundle reads (nodes, claims, and claim→span provenance). */
-export type NodeContextRepos = Pick<Repositories, 'nodes' | 'claims' | 'claimSpans'>;
+/** The repository surface the bundle reads (nodes, claims, claim→span provenance, sources). */
+export type NodeContextRepos = Pick<Repositories, 'nodes' | 'claims' | 'claimSpans' | 'sources'>;
 
 /** The target node, INCLUDING its current prose — the agent revises this body (finding 25). */
 export interface ContextNode {
@@ -51,6 +51,10 @@ export interface ContextProvenance {
   sourceId: SourceId;
   sourceTitle: string;
   quoteSnippet: string;
+  /** The anchoring source's status — non-active means the quote is dated (Phase 5 §2). */
+  sourceStatus: string;
+  /** Active head of the source's supersession chain; null when active or no head. */
+  supersededBy: SourceId | null;
 }
 
 /** A citable claim, tagged with the node that owns it. */
@@ -171,7 +175,16 @@ export function buildNodeContext(repos: NodeContextRepos, nodeId: NodeId): NodeC
       return sortOrder(a.id) - sortOrder(b.id) || cmp(a.id, b.id);
     });
 
-  // ONE batched provenance query for every claim, grouped in memory.
+  // ONE batched provenance query for every claim, grouped in memory. Successor
+  // resolution is cached per source, so a non-active source's chain walks once.
+  const successorCache = new Map<SourceId, SourceId | null>();
+  const supersededBy = (sourceId: SourceId, sourceStatus: string): SourceId | null => {
+    if (sourceStatus === 'active') return null;
+    if (!successorCache.has(sourceId)) {
+      successorCache.set(sourceId, repos.sources.activeSuccessorOf(sourceId)?.id ?? null);
+    }
+    return successorCache.get(sourceId)!;
+  };
   let snippetsTruncated = false;
   const provenanceByClaim = new Map<ClaimId, Array<ContextProvenance & { charStart: number; spanId: string }>>();
   for (const row of repos.claimSpans.provenanceForClaims(citable.map((c) => c.id))) {
@@ -182,6 +195,8 @@ export function buildNodeContext(repos: NodeContextRepos, nodeId: NodeId): NodeC
       sourceId: row.sourceId,
       sourceTitle: row.sourceTitle,
       quoteSnippet: cut.text,
+      sourceStatus: row.sourceStatus,
+      supersededBy: supersededBy(row.sourceId, row.sourceStatus),
       charStart: row.charStart,
       spanId: row.spanId,
     });
@@ -194,7 +209,13 @@ export function buildNodeContext(repos: NodeContextRepos, nodeId: NodeId): NodeC
     if (!owner) continue; // unreachable: listInSubtree only returns claims owned in the subtree
     const provenance = (provenanceByClaim.get(claim.id) ?? [])
       .sort((a, b) => cmp(a.sourceId, b.sourceId) || a.charStart - b.charStart || cmp(a.spanId, b.spanId))
-      .map(({ sourceId, sourceTitle, quoteSnippet }) => ({ sourceId, sourceTitle, quoteSnippet }));
+      .map(({ sourceId, sourceTitle, quoteSnippet, sourceStatus, supersededBy }) => ({
+        sourceId,
+        sourceTitle,
+        quoteSnippet,
+        sourceStatus,
+        supersededBy,
+      }));
     sortable.push({
       ownerDepth: owner.depth,
       ownerSortOrder: owner.sortOrder,

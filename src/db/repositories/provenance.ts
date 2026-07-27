@@ -52,6 +52,8 @@ export interface ClaimProvenance {
   spanId: SpanId;
   sourceId: SourceId;
   sourceTitle: string;
+  /** The anchoring source's status — non-active means the quote is dated (Phase 5 §2). */
+  sourceStatus: string;
   charStart: number;
   quote: string;
 }
@@ -104,7 +106,8 @@ export class ClaimSpanRepo {
     return this.db
       .prepare(
         `SELECT DISTINCT cs.claim_id AS claimId, s.id AS spanId, s.source_id AS sourceId,
-                src.title AS sourceTitle, s.char_start AS charStart, s.quote AS quote
+                src.title AS sourceTitle, src.status AS sourceStatus,
+                s.char_start AS charStart, s.quote AS quote
            FROM claim_spans cs
            JOIN spans s ON s.id = cs.span_id
            JOIN sources src ON src.id = s.source_id
@@ -112,6 +115,31 @@ export class ClaimSpanRepo {
           ORDER BY cs.claim_id, s.source_id, s.char_start, s.id`,
       )
       .all(...claimIds) as ClaimProvenance[];
+  }
+
+  /**
+   * ACTIVE claims quoting `sourceId` (supports role) whose EVERY supporting span
+   * anchors to a non-active source — the claims a `--supersedes` ingest just
+   * stranded (Phase 5 §1.4). Ordered by claim id for a deterministic receipt.
+   */
+  strandedClaimIds(sourceId: SourceId): ClaimId[] {
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT cs.claim_id AS claimId
+           FROM claim_spans cs
+           JOIN spans s ON s.id = cs.span_id
+           JOIN claims c ON c.id = cs.claim_id
+          WHERE s.source_id = ? AND cs.role = 'supports' AND c.status = 'active'
+            AND NOT EXISTS (
+              SELECT 1 FROM claim_spans cs2
+                JOIN spans s2 ON s2.id = cs2.span_id
+                JOIN sources src2 ON src2.id = s2.source_id
+               WHERE cs2.claim_id = cs.claim_id AND cs2.role = 'supports' AND src2.status = 'active'
+            )
+          ORDER BY cs.claim_id`,
+      )
+      .all(sourceId) as Array<{ claimId: ClaimId }>;
+    return rows.map((r) => r.claimId);
   }
 
   /** Spans (joined) that support a claim, for provenance display. */

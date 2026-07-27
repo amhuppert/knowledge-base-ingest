@@ -41,6 +41,8 @@ export interface SteeringState {
   staleIds?: string[];
   /** New source id (ingest). */
   newSourceId?: string;
+  /** Claims left anchored ONLY to the superseded source after a `--supersedes` ingest (Phase 5 §1.4). */
+  strandedClaimCount?: number;
   /** Source id in scope (claim apply failure → reread its chunks). */
   sourceId?: string;
   /** First entity id (graph apply). */
@@ -155,6 +157,26 @@ export const STEERING_TABLE: SteeringRow[] = [
         ? actionIf(r, 'source chunks', 'Read the new source chunks', `kb source chunks ${s.newSourceId} --json`)
         : [],
       hints: hintIf(r, 'claim apply', 'kb claim apply --help --json shows the claim payload shape'),
+    }),
+  },
+  {
+    // A `--supersedes` ingest that leaves claims anchored only to the old source says
+    // so IN THE RECEIPT (Phase 5 §1.4) — the moment the strand is created, not the next
+    // verify. Both hints embed commands, so each is registry-filtered independently.
+    command: 'ingest',
+    when: (s) => isOk(s) && (s.strandedClaimCount ?? 0) > 0,
+    build: (s, r) => ({
+      nextActions: [],
+      hints: [
+        ...(s.newSourceId
+          ? hintIf(
+              r,
+              'source chunks',
+              `${s.strandedClaimCount} claim(s) are now anchored only to the superseded source — re-extract from kb source chunks ${s.newSourceId} --json.`,
+            )
+          : []),
+        ...hintIf(r, 'verify', 'kb verify --strict --json lists the stranded claims.'),
+      ],
     }),
   },
   {

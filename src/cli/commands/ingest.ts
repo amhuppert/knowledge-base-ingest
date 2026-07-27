@@ -326,9 +326,15 @@ export function registerIngest(program: Command, ctx: RunContext): void {
         if (ctx.dryRun) return dryRunReceipt(path, plan, opts, ctx);
 
         const r = ws.ingest.commit(plan);
+        // A supersede strands the old source's claims the moment it commits; count them
+        // NOW so the receipt says so (Phase 5 §1.4) instead of waiting for a verify.
+        const supersedes = optStr(opts, 'supersedes');
+        const strandedClaimCount = supersedes
+          ? ws.repos.claimSpans.strandedClaimIds(makeSourceId(supersedes)).length
+          : 0;
         // Steer to the new source's chunks (01 §6.1). `next` is a deprecated string alias
         // mirroring the primary next-action verbatim (03 §3 compatibility matrix).
-        const steering = steeringFor('ingest', { ok: true, newSourceId: r.source.id }, ctx.registry);
+        const steering = steeringFor('ingest', { ok: true, newSourceId: r.source.id, strandedClaimCount }, ctx.registry);
         return success(
           {
             sourceId: r.source.id,

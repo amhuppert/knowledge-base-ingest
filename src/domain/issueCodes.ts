@@ -39,6 +39,8 @@ export const ISSUE_CODES = [
   'CITATION_UNKNOWN',
   'CITATION_OUT_OF_SUBTREE',
   'CITATION_INACTIVE',
+  // Phase 5: a claim/citation whose every supporting span anchors to a non-active source.
+  'PROVENANCE_SOURCE_INACTIVE',
 
   // --- Hierarchy / batch structure (Phase 2) ---
   'ROOT_HAS_PARENT',

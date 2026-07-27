@@ -31,8 +31,12 @@ back to a source-backed claim. This skill is read-only: it never mutates the KB.
   advice, not commands.
 - **Never write a payload from memory.** Get the shape from `kb answer-check --help --json`
   (`data.input.example`) right before you author it.
-- Export an **absolute** `KB_DIR` or pass `--kb <absolute-dir>`; a bare relative value is
-  rebased by any later `cd`.
+- **First action: export an absolute `KB_DIR`** (`export KB_DIR=/abs/path/to/kb`), then
+  never pass `--kb` again in the session. A bare relative value is rebased by any later
+  `cd`; `kb status` echoes `resolvedVia` (`flag | env | walk-up`) so preflight confirms
+  which resolution actually ran.
+- Provenance entries carry `sourceStatus` and `supersededBy` — a non-active anchor is
+  handled by the `PROVENANCE_SOURCE_INACTIVE` recovery row, never by reading `kb/index.md`.
 - Commands are written as `kb …` — the globally installed CLI. Inside a clone of the
   repo, use `./bin/kb …` instead; the preflight `kb version --json` tells you which one
   you are running.
@@ -62,6 +66,7 @@ preflight → discover → preview → apply → resume → finish
 | `UNCITED_ASSERTION` | The issue carries the offending sentence **and its line number** — add a `[^clm_…]` citation to that line, or soften the sentence so it no longer asserts a fact. A **lead-in that introduces a cited list still counts as an assertion** ("Four open questions remain about rate limiting." → flagged, even with every list item cited below it). Either cite the same claims on the lead-in, or keep it under five words (`Open questions:`) |
 | `CITATION_UNKNOWN` | The cited id does not exist; find the real one with `kb search <text> --scope claims --json` or `kb node show <node_id> --json` |
 | `CITATION_INACTIVE` | The claim is superseded or retracted — cite the superseding claim named in the hint (`kb provenance <claim_id> --json` shows the lineage) |
+| `PROVENANCE_SOURCE_INACTIVE` | **Warning, not a failure**: the citation's quotes anchor only to a non-active source. Read the hint — if the quote survives in the active successor, the citation is usable; disclose the dated anchor in the Sources block. If it does not survive, verify against the successor (`kb provenance <claim_id> --json` shows `sourceStatus`/`supersededBy`) or drop the assertion |
 | `CITATION_OUT_OF_SUBTREE` | Cite only ids from that node's `--context` `allowedCitationIds`; move the claim or cite the right node |
 | `PAYLOAD_SCHEMA` | Fetch `kb answer-check --help --json`, fix the field named by the issue `path`, re-check |
 | `QUOTE_AMBIGUOUS` / `QUOTE_NOT_FOUND` | Quote failures come from *writing* claims, not answering — hand them to the **kb-ingest** skill |
@@ -74,12 +79,14 @@ preflight → discover → preview → apply → resume → finish
 ### 1. preflight
 
 ```
+export KB_DIR=/abs/path/to/kb   # once, absolute; all later commands omit --kb
 kb version --json
 kb status --json
 ```
 
-`status` tells you whether the KB has anything to answer from (claim and node counts) and
-which root you are pointed at.
+`status` tells you whether the KB has anything to answer from (claim and node counts),
+which root you are pointed at, and `resolvedVia` — how that root was resolved
+(`flag | env | walk-up`), so a wrong-KB mistake surfaces here, not as empty retrievals.
 
 ### 2. discover — the retrieval sequence
 
@@ -152,10 +159,14 @@ Then validate it before showing it to anyone:
 kb answer-check --file ./answer.json --json
 ```
 
-(`kb answer-check --help --json` shows the payload shape.) The result reports
-`citedClaims`, `unknownCitations`, `inactiveCitations`, and `uncited` — each uncited
-entry carries the sentence `text` **and its `line`**, so fix the exact line rather than
-rewriting the answer. Loop until `ok:true`.
+(`kb answer-check --help --json` shows the payload shape.) The payload needs only
+`{ answer }` — citations are parsed from the text; `claim_ids` exists for out-of-band
+ids only, and hand-maintaining it just lets it drift from the text. The result reports
+`citedClaims`, `unknownCitations`, `inactiveCitations`, `staleSourceCitations`, and
+`uncited` — each uncited entry carries the sentence `text` **and its `line`**, so fix
+the exact line rather than rewriting the answer. Loop until `ok:true`. A
+`PROVENANCE_SOURCE_INACTIVE` warning does not block `ok:true` — handle it per the
+recovery table before presenting.
 
 ### 5. apply — present with provenance
 
@@ -166,6 +177,9 @@ provenance you already have; for anything you still need, use:
 ```
 kb provenance <claim_id> --json
 ```
+
+Its payload is the claim under `data.claim` and the spans under `data.provenance`
+(not `data.spans`); the full field list comes from `kb provenance --help --json`.
 
 Before you present it: read each cited quote and confirm it supports the sentence it is
 attached to. `answer-check` cannot do this for you.

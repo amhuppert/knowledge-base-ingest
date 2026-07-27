@@ -21,6 +21,7 @@ import {
   type SearchResult,
   type AskContextResult,
   type AnswerCheckResult,
+  type StaleSourceCitation,
 } from '../../query/query.js';
 import { AnswerCheckSchema } from '../../domain/schemas/agent.js';
 import { CLAIM_TYPES } from '../../domain/schemas/enums.js';
@@ -85,12 +86,30 @@ function askContextHints(res: AskContextResult): string[] {
 }
 
 /**
+ * The DYNAMIC hint for a stranded citation (Phase 5 §1.2): it names the concrete
+ * source/successor ids so the recovery stays executable, and states the survival
+ * verdict the CLI already measured — the agent's judgment call starts from facts,
+ * not from a re-derivation.
+ */
+function staleSourceHint(s: StaleSourceCitation): string {
+  const sources = s.sourceIds.join(', ');
+  if (s.quoteSurvives === null || s.successorId === null) {
+    return `${s.claimId}’s quotes anchor only to non-active ${sources} with no active successor — verify the claim still holds before citing it.`;
+  }
+  return s.quoteSurvives
+    ? `${s.claimId}’s quotes anchor to superseded ${sources} but survive verbatim in active successor ${s.successorId} — usable; re-anchor or re-extract on the next ingest pass.`
+    : `${s.claimId}’s quote does not appear in ${s.successorId}, the active successor of ${sources} — the claim may be outdated; verify before citing, or hand re-extraction to the kb-ingest skill.`;
+}
+
+/**
  * Build the ordered, coded issues for an answer-check report (05 §4.3, finding 33):
  * one CITATION_UNKNOWN per unknown id, then one CITATION_INACTIVE per inactive id
  * (each in first-occurrence order), then one UNCITED_ASSERTION per uncited sentence
- * in line order — every issue carrying its registry hint. The report arrays already
- * hold those orders, so this is a straight projection. Envelope `ok` (derived from
- * these error-severity issues) therefore equals `report.ok`.
+ * in line order — every issue carrying its registry hint — then one WARNING-severity
+ * PROVENANCE_SOURCE_INACTIVE per stranded citation (Phase 5 §1.2) with a dynamic
+ * hint. The report arrays already hold those orders, so this is a straight
+ * projection. Envelope `ok` derives from the error-severity issues only, so it
+ * still equals `report.ok` — stranded citations warn without failing the check.
  */
 export function answerCheckIssues(report: AnswerCheckResult): Issue[] {
   const issues: Issue[] = [];
@@ -102,6 +121,15 @@ export function answerCheckIssues(report: AnswerCheckResult): Issue[] {
   }
   for (const u of report.uncited) {
     issues.push({ code: 'UNCITED_ASSERTION', severity: 'error', message: `line ${u.line}: "${u.text}"`, hint: hintFor('UNCITED_ASSERTION') });
+  }
+  for (const s of report.staleSourceCitations) {
+    issues.push({
+      code: 'PROVENANCE_SOURCE_INACTIVE',
+      severity: 'warning',
+      ids: [s.claimId],
+      message: `cited claim ${s.claimId} is anchored only to non-active source(s) ${s.sourceIds.join(', ')}`,
+      hint: staleSourceHint(s),
+    });
   }
   return issues;
 }
@@ -167,7 +195,12 @@ export function registerQuery(program: Command, ctx: RunContext): void {
         { flags: '--claim-type <type>', description: 'restrict claims to this type', choices: CLAIM_TYPES },
         { flags: '--node <node_id>', description: 'restrict claims to this node’s subtree' },
       ],
-      output: ['claims with provenance', 'related nodes', 'related entities', 'applied: the { claimType, node } filters echoed back'],
+      output: [
+        'claims with provenance (each span: sourceTitle, quote, storedPath, sourceStatus, supersededBy)',
+        'related nodes',
+        'related entities',
+        'applied: the { claimType, node } filters echoed back',
+      ],
       sideEffects: [],
       atomic: false,
       supportsDryRun: false,
@@ -206,12 +239,16 @@ export function registerQuery(program: Command, ctx: RunContext): void {
         schema: 'AnswerCheckSchema',
         example: {
           answer: 'The service is written in Rust [^clm_1a2b3c].',
-          claim_ids: ['clm_1a2b3c'],
         },
+        notes: [
+          'claim_ids is optional and normally omitted — citations are parsed from the answer text.',
+          'Supply it only to validate ids that do not appear in the text.',
+        ],
       },
       output: [
         'ok (mirrors envelope ok)',
         'citedClaims / unknownCitations / inactiveCitations',
+        'staleSourceCitations: [{ claimId, sourceIds, successorId, quoteSurvives }] (warnings; never affects ok)',
         'uncited: [{ text, line }] (uncitedSentences retained as a deprecated alias)',
       ],
       sideEffects: [],
@@ -247,7 +284,11 @@ export function registerQuery(program: Command, ctx: RunContext): void {
       summary: 'Show a claim and its source quotes, offsets, source titles, and stored paths.',
       args: [{ name: 'claim_id', description: 'the claim id (clm_…) whose provenance to show' }],
       flags: [],
-      output: ['claim', 'provenance: [{ quote, charStart, charEnd, sourceTitle, storedPath }]'],
+      output: [
+        'claim',
+        'provenance: [{ quote, charStart, charEnd, sourceTitle, sourceStatus, supersededBy, storedPath }]',
+        'supersededBy: the active successor source id when sourceStatus is not active (else null)',
+      ],
       sideEffects: [],
       atomic: false,
       supportsDryRun: false,
@@ -262,7 +303,16 @@ export function registerQuery(program: Command, ctx: RunContext): void {
       if (!claim) return result(null, [unknownIdIssue('UNKNOWN_CLAIM', `unknown claim ${id}`, id)]);
       const spans = ws.repos.claimSpans.spansForClaim(claim.id).map((s) => {
         const src = ws.repos.sources.getById(s.sourceId);
-        return { quote: s.quote, charStart: s.charStart, charEnd: s.charEnd, sourceTitle: src?.title, storedPath: src?.storedPath };
+        const sourceStatus = src?.status ?? 'active';
+        return {
+          quote: s.quote,
+          charStart: s.charStart,
+          charEnd: s.charEnd,
+          sourceTitle: src?.title,
+          sourceStatus,
+          supersededBy: sourceStatus === 'active' ? null : (ws.repos.sources.activeSuccessorOf(s.sourceId)?.id ?? null),
+          storedPath: src?.storedPath,
+        };
       });
       return success({ claim, provenance: spans });
     }),

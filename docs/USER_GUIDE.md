@@ -515,7 +515,7 @@ kb node show [options] <node_id>
 **Output**
 
 - node, claims owned by the node (with ids to cite during synthesis)
-- --context: node (bodyMd + bodyHash included), children [{…, ownClaims: citable claims owned directly}], claims (the whole subtree, active + conflicted, owner-tagged, each with provenance snippets), sources [{ id, title, claimCount: bundle claims quoting it }], allowedCitationIds, stats { descendantNodes, claims, approxTokens, complete }
+- --context: node (bodyMd + bodyHash included), children [{…, ownClaims: citable claims owned directly}], claims (the whole subtree, active + conflicted, owner-tagged, each with provenance snippets carrying sourceStatus + supersededBy), sources [{ id, title, claimCount: bundle claims quoting it }], allowedCitationIds, stats { descendantNodes, claims, approxTokens, complete }
 
 **Examples**
 
@@ -928,12 +928,14 @@ kb answer-check [options]
 
 **Input**
 
+```text
+claim_ids is optional and normally omitted — citations are parsed from the answer text.
+Supply it only to validate ids that do not appear in the text.
+```
+
 ```json
 {
-  "answer": "The service is written in Rust [^clm_1a2b3c].",
-  "claim_ids": [
-    "clm_1a2b3c"
-  ]
+  "answer": "The service is written in Rust [^clm_1a2b3c]."
 }
 ```
 
@@ -941,6 +943,7 @@ kb answer-check [options]
 
 - ok (mirrors envelope ok)
 - citedClaims / unknownCitations / inactiveCitations
+- staleSourceCitations: [{ claimId, sourceIds, successorId, quoteSurvives }] (warnings; never affects ok)
 - uncited: [{ text, line }] (uncitedSentences retained as a deprecated alias)
 
 **Examples**
@@ -977,7 +980,7 @@ kb ask-context [options] <question...>
 
 **Output**
 
-- claims with provenance
+- claims with provenance (each span: sourceTitle, quote, storedPath, sourceStatus, supersededBy)
 - related nodes
 - related entities
 - applied: the { claimType, node } filters echoed back
@@ -1017,7 +1020,8 @@ kb provenance <claim_id>
 **Output**
 
 - claim
-- provenance: [{ quote, charStart, charEnd, sourceTitle, storedPath }]
+- provenance: [{ quote, charStart, charEnd, sourceTitle, sourceStatus, supersededBy, storedPath }]
+- supersededBy: the active successor source id when sourceStatus is not active (else null)
 
 **Examples**
 
@@ -1196,6 +1200,7 @@ kb status
 **Output**
 
 - root
+- resolvedVia: how the root was resolved (flag | env | walk-up)
 - cli + schema (version fields)
 - counts: sources, chunks, nodes, staleNodes, claims, spans, entities, relationships
 

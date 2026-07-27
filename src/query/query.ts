@@ -16,7 +16,7 @@
 import type { Repositories } from '../db/repositories/index.js';
 import { ClaimRow, NodeRow, ChunkRow } from '../db/rows.js';
 import type { Claim, Node, Chunk } from '../domain/schemas/models.js';
-import type { ClaimId, NodeId } from '../domain/ids.js';
+import type { ClaimId, NodeId, SourceId } from '../domain/ids.js';
 import { DomainIssueError } from '../domain/issueCodes.js';
 import { extractCitations } from '../domain/algorithms/citations.js';
 import { scanRegions, splitSentenceSpans } from '../domain/algorithms/markdown.js';
@@ -275,7 +275,15 @@ export interface ClaimContext {
   status: string;
   nodeId: string | null;
   nodeTitle: string | null;
-  provenance: Array<{ sourceTitle: string; quote: string; storedPath: string }>;
+  provenance: Array<{
+    sourceTitle: string;
+    quote: string;
+    storedPath: string;
+    /** The anchoring source's status — non-active means the quote is dated (Phase 5 §2). */
+    sourceStatus: string;
+    /** Active head of the source's supersession chain; null when active or no head. */
+    supersededBy: string | null;
+  }>;
 }
 
 /**
@@ -305,10 +313,13 @@ function enrichClaim(repos: Repositories, claim: Claim): ClaimContext {
   const node = claim.nodeId ? repos.nodes.getById(claim.nodeId) : undefined;
   const provenance = repos.claimSpans.spansForClaim(claim.id).map((span) => {
     const source = repos.sources.getById(span.sourceId);
+    const sourceStatus = source?.status ?? 'active';
     return {
       sourceTitle: source?.title ?? span.sourceId,
       quote: span.quote,
       storedPath: source?.storedPath ?? '',
+      sourceStatus,
+      supersededBy: sourceStatus === 'active' ? null : (repos.sources.activeSuccessorOf(span.sourceId)?.id ?? null),
     };
   });
   return {
@@ -474,12 +485,29 @@ export interface UncitedAssertion {
   line: number;
 }
 
+/**
+ * A cited ACTIVE claim whose every supporting span anchors to a non-active
+ * source (Phase 5 §1.2) — the provenance is intact but *dated*. `successorId` is
+ * the active head of the first stranded source's supersession chain (null when
+ * none); `quoteSurvives` is true iff EVERY stranded supporting quote occurs
+ * verbatim in its source's active successor, false when at least one does not,
+ * and null when a stranded source has no active successor to check against.
+ */
+export interface StaleSourceCitation {
+  claimId: string;
+  sourceIds: string[];
+  successorId: string | null;
+  quoteSurvives: boolean | null;
+}
+
 export interface AnswerCheckResult {
   /** Mirrors the envelope `ok`: true iff no unknown/inactive citation and nothing uncited. */
   ok: boolean;
   citedClaims: string[];
   unknownCitations: string[];
   inactiveCitations: string[];
+  /** Warning-severity findings; never affects `ok` (Phase 5 §1.2). */
+  staleSourceCitations: StaleSourceCitation[];
   uncited: UncitedAssertion[];
   /**
    * @deprecated Alias of `uncited[].text`; RETAINED for all of envelope v2
@@ -490,6 +518,53 @@ export interface AnswerCheckResult {
 
 /** Claim statuses that make a citation "inactive" (stale provenance). */
 const INACTIVE_STATUSES = new Set(['superseded', 'retracted']);
+
+/**
+ * The stale-source row for a cited claim, or null when the claim keeps at least
+ * one supporting span on an ACTIVE source (mixed provenance is not stranded) or
+ * has no supporting spans at all (that is `claim-has-provenance`'s finding).
+ */
+function staleSourceCitationFor(repos: Repositories, claimId: ClaimId): StaleSourceCitation | null {
+  const spanIds = new Set(
+    repos.claimSpans
+      .listByClaim(claimId)
+      .filter((cs) => cs.role === 'supports')
+      .map((cs) => cs.spanId),
+  );
+  if (spanIds.size === 0) return null;
+  const spans = repos.claimSpans.spansForClaim(claimId).filter((s) => spanIds.has(s.id));
+
+  // Distinct sources in span order; stranded iff none is active.
+  const sourceIds: SourceId[] = [];
+  for (const s of spans) if (!sourceIds.includes(s.sourceId)) sourceIds.push(s.sourceId);
+  const statuses = sourceIds.map((id) => repos.sources.getById(id)?.status ?? 'active');
+  if (statuses.some((status) => status === 'active')) return null;
+
+  // Survival probe (Phase 5 §1.1): every stranded quote must occur verbatim in its
+  // source's active successor; no successor for some source ⇒ nothing to check ⇒ null.
+  const successorTexts = new Map<SourceId, string | undefined>(
+    sourceIds.map((id) => {
+      const successor = repos.sources.activeSuccessorOf(id);
+      return [id, successor ? repos.sourceTexts.get(successor.id)?.text : undefined];
+    }),
+  );
+  let quoteSurvives: boolean | null = true;
+  for (const s of spans) {
+    const text = successorTexts.get(s.sourceId);
+    if (text === undefined) {
+      quoteSurvives = null;
+      break;
+    }
+    if (!text.includes(s.quote)) quoteSurvives = false;
+  }
+
+  return {
+    claimId,
+    sourceIds,
+    successorId: repos.sources.activeSuccessorOf(sourceIds[0]!)?.id ?? null,
+    quoteSurvives,
+  };
+}
 
 const CITATION_TOKEN_RE = /\[\^clm_[0-9a-f]+\]/;
 
@@ -553,13 +628,19 @@ export function answerCheck(
   const allIds = [...new Set([...citedClaims, ...(claimIds ?? [])])];
   const unknownCitations: string[] = [];
   const inactiveCitations: string[] = [];
+  const staleSourceCitations: StaleSourceCitation[] = [];
   for (const id of allIds) {
     const claim = repos.claims.getById(id as ClaimId);
     if (!claim) {
       unknownCitations.push(id);
       continue;
     }
-    if (INACTIVE_STATUSES.has(claim.status)) inactiveCitations.push(id);
+    if (INACTIVE_STATUSES.has(claim.status)) {
+      inactiveCitations.push(id);
+      continue;
+    }
+    const stale = staleSourceCitationFor(repos, claim.id);
+    if (stale) staleSourceCitations.push(stale);
   }
 
   // Assertions: prose regions only, one span per sentence, line from its offset.
@@ -580,6 +661,7 @@ export function answerCheck(
     citedClaims,
     unknownCitations,
     inactiveCitations,
+    staleSourceCitations,
     uncited,
     uncitedSentences: uncited.map((u) => u.text),
   };

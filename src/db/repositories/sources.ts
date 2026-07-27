@@ -103,6 +103,34 @@ export class SourceRepo {
     this.db.prepare('UPDATE sources SET status = ? WHERE id = ?').run(status, id);
   }
 
+  /**
+   * The source that supersedes `id` (reverse edge of `supersedes_source_id`);
+   * newest by `(ingested_at, id)` when several claim the edge.
+   */
+  supersederOf(id: SourceId): Source | undefined {
+    const r = this.db
+      .prepare('SELECT * FROM sources WHERE supersedes_source_id = ? ORDER BY ingested_at DESC, id DESC LIMIT 1')
+      .get(id);
+    return r ? SourceRow.parse(r) : undefined;
+  }
+
+  /**
+   * The ACTIVE head of the supersession chain starting at `id` (Phase 5 §1.1):
+   * follow superseder edges until an active source, cycle-guarded; undefined when
+   * the chain dies out without an active head.
+   */
+  activeSuccessorOf(id: SourceId): Source | undefined {
+    const seen = new Set<SourceId>([id]);
+    let current = this.supersederOf(id);
+    while (current) {
+      if (current.status === 'active') return current;
+      if (seen.has(current.id)) return undefined;
+      seen.add(current.id);
+      current = this.supersederOf(current.id);
+    }
+    return undefined;
+  }
+
   setSupersedes(id: SourceId, supersedesId: SourceId): void {
     this.db.prepare('UPDATE sources SET supersedes_source_id = ? WHERE id = ?').run(supersedesId, id);
   }

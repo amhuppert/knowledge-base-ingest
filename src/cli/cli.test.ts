@@ -98,6 +98,15 @@ describe('kb CLI (in-process)', () => {
     expect((status.json.data as { sources: number }).sources).toBe(1);
   });
 
+  it('status reports how the KB root was resolved (Phase 5 §5)', async () => {
+    const viaEnv = await run(kb, ['status']);
+    expect((viaEnv.json.data as { resolvedVia: string }).resolvedVia).toBe('env');
+    const viaFlag = await runIo(['status', '--kb', kb]);
+    expect((viaFlag.json.data as { resolvedVia: string }).resolvedVia).toBe('flag');
+    const viaWalkUp = await runIo(['status'], { cwd: kb });
+    expect((viaWalkUp.json.data as { resolvedVia: string }).resolvedVia).toBe('walk-up');
+  });
+
   it('applies a claim with an exact quote (exit 0)', async () => {
     const payload = JSON.stringify({
       source_id: sourceId,

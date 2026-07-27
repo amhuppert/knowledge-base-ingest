@@ -64,6 +64,7 @@ preflight → discover → preview → apply → resume → finish
 | `QUOTE_NOT_FOUND` | Re-copy the quote verbatim from the chunk text — never retype it or normalize whitespace |
 | `CITATION_OUT_OF_SUBTREE` | Cite only ids from that node's `--context` `allowedCitationIds`; move the claim or cite the right node |
 | `CITATION_INACTIVE` | Cite the superseding claim named in the hint |
+| `PROVENANCE_SOURCE_INACTIVE` | Claims anchored only to a non-active source — appears after a `--supersedes` ingest; re-extract from the active successor (see the **kb-ingest** skill) |
 | `NODE_TITLE_MISMATCH` / `NODE_KIND_MISMATCH` | Align the manifest with the existing node, or choose a new slug — do not force |
 | `UNSUPPORTED_MEDIA` | Follow the recipe in the error verbatim (the `--text-from` flow; see the **kb-ingest** skill) |
 | `INVALID_ARGUMENT` on a repeated original with a new sidecar | Follow the corrected-transcription recipe in the hint (new source + `--supersedes`) |
@@ -76,6 +77,7 @@ preflight → discover → preview → apply → resume → finish
 ### 1. preflight
 
 ```
+export KB_DIR="$(pwd)/<kb-dir>"   # once, absolute; all later commands omit --kb
 kb version --json
 kb init "$KB_DIR" --json
 kb status --json

@@ -131,7 +131,13 @@ describe('kb node show --context — the 04 §1 bundle', () => {
     const leafClaim = data.claims.find((c) => c.id === leafClaimId)!;
     expect(leafClaim).toMatchObject({ nodeTitle: 'Rate limiting', status: 'active', claimType: 'fact' });
     expect(leafClaim.provenance).toEqual([
-      { sourceId, sourceTitle: expect.any(String), quoteSnippet: 'holds entries for sixty seconds' },
+      {
+        sourceId,
+        sourceTitle: expect.any(String),
+        quoteSnippet: 'holds entries for sixty seconds',
+        sourceStatus: 'active',
+        supersededBy: null,
+      },
     ]);
 
     expect(data.sources).toEqual([{ id: sourceId, title: expect.any(String), claimCount: 2 }]);

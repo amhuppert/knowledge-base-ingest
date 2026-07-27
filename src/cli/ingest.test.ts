@@ -140,6 +140,55 @@ describe('kb ingest (real receipt)', () => {
   });
 });
 
+describe('kb ingest --supersedes (stranded-claims steering, Phase 5 §1.4)', () => {
+  it('the supersede receipt reports claims left anchored only to the superseded source', async () => {
+    const doc = writeDoc('v1.md', '# Widget\n\nThe widget service caches results in Redis for speed.\n');
+    const ing = await runIo(['ingest', doc]);
+    const oldId = ing.json.data!.sourceId as string;
+
+    // Anchor one claim to the v1 source.
+    const chunks = await runIo(['source', 'chunks', oldId]);
+    const chunk = (chunks.json.data as unknown as { chunks: Array<{ id: string; text: string }> }).chunks.find((c) =>
+      c.text.includes('caches results in Redis'),
+    )!;
+    const node = await runIo(['node', 'create', '--title', 'Widget', '--kind', 'root']);
+    const nodeId = (node.json.data as unknown as { nodeId: string }).nodeId;
+    const payload = join(kb, 'claims.json');
+    writeFileSync(
+      payload,
+      JSON.stringify({
+        source_id: oldId,
+        claims: [
+          {
+            node_id: nodeId,
+            text: 'The widget service caches in Redis.',
+            claim_type: 'fact',
+            confidence: 0.9,
+            spans: [{ chunk_id: chunk.id, quote: 'caches results in Redis' }],
+          },
+        ],
+      }),
+    );
+    expect((await runIo(['claim', 'apply', '--file', payload])).json.ok).toBe(true);
+
+    const v2 = writeDoc('v2.md', '# Widget\n\nThe widget service caches results in Redis for speed. Revised.\n');
+    const supersede = await runIo(['ingest', v2, '--supersedes', oldId]);
+    expect(supersede.json.ok).toBe(true);
+    const joined = supersede.json.hints.join(' ');
+    expect(joined).toContain('1 claim(s)');
+    expect(joined).toContain('anchored only to the superseded source');
+    expect(joined).toContain(`kb source chunks ${supersede.json.data!.sourceId as string} --json`);
+    expect(joined).toContain('kb verify --strict --json');
+  });
+
+  it('a plain ingest receipt carries no supersede hint', async () => {
+    const doc = writeDoc('plain.md', '# Plain\n\nNothing here was superseded.\n');
+    const ing = await runIo(['ingest', doc]);
+    expect(ing.json.ok).toBe(true);
+    expect(ing.json.hints.join(' ')).not.toContain('superseded source');
+  });
+});
+
 describe('kb ingest --dry-run (dash-prefixed relative path)', () => {
   it('the steered re-run replays verbatim through the real router (no unknown-option error)', async () => {
     // Absolute paths never start with `-`; the hazard is a RELATIVE path like `-notes.md`.

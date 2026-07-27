@@ -37,6 +37,9 @@ const REQUIRED_CODES = [
   'QUOTE_NOT_FOUND',
   'CITATION_OUT_OF_SUBTREE',
   'CITATION_INACTIVE',
+  // Phase 5 §1.5: supersession is created by kb-ingest and consumed by kb-query,
+  // so every skill carries the stranded-provenance recovery row.
+  'PROVENANCE_SOURCE_INACTIVE',
   'NODE_TITLE_MISMATCH',
   'NODE_KIND_MISMATCH',
   'UNSUPPORTED_MEDIA',
@@ -136,5 +139,12 @@ describe('skill drift guard (07 §4)', () => {
     it('keeps the active-development note until the 07 §3 eval passes', () => {
       expect(text).toContain('<note>Skill in active development');
     });
+  });
+
+  // Phase 5 §3 (ISSUES.md #3): the one payload key agents guessed wrong. Pinning the
+  // literal token means a rename of the provenance payload key must touch the skill
+  // in the same change — the same mechanism as the pinned stage names above.
+  it('kb-query names the provenance payload key (data.provenance, not data.spans)', () => {
+    expect(skillText('kb-query')).toContain('data.provenance');
   });
 });

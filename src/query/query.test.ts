@@ -57,8 +57,10 @@ function chunkContaining(repos: Repositories, sourceId: SourceId, needle: string
 
 /** Full pipeline: ingest the doc, create root + leaf nodes, apply one claim. */
 function seedKb(): {
+  ctx: ServiceContext;
   repos: Repositories;
   sourceId: SourceId;
+  leafId: NodeId;
   leafTitle: string;
   claimId: string;
 } {
@@ -91,7 +93,7 @@ function seedKb(): {
     ],
   });
   const claim = repos.claims.listByNode(leaf.id)[0]!;
-  return { repos, sourceId, leafTitle: leaf.title, claimId: claim.id };
+  return { ctx, repos, sourceId, leafId: leaf.id, leafTitle: leaf.title, claimId: claim.id };
 }
 
 describe('search', () => {
@@ -543,7 +545,120 @@ describe('answerCheck', () => {
     // …and the definition line itself is never treated as an uncited assertion.
     expect(r.uncited).toHaveLength(0);
   });
+});
 
+/** Ingest `doc` as a NEW source that supersedes `oldId` (marks it superseded). */
+function supersedeWith(ctx: ServiceContext, oldId: SourceId, doc: string): SourceId {
+  const r = new IngestService(ctx).ingest({
+    bytes: Buffer.from(doc, 'utf8'),
+    ext: 'md',
+    mediaType: 'text/markdown',
+    originalPath: 'auth-v2.md',
+    supersedes: oldId,
+  });
+  return r.source.id;
+}
+
+/** A v2 doc that KEEPS the seeded claim's quoted line verbatim. */
+const DOC_V2 = `${DOC}\n\n## Change Log\n\nRe-issued after the quarterly review.\n`;
+
+/** A v2 doc that REWORDS the quoted line (the quote does not survive). */
+const DOC_V2_CHANGED = `${DOC.replace(
+  'rotates refresh tokens on every use',
+  'rotates access tokens once per hour',
+)}\n\n## Change Log\n\nRe-issued after the quarterly review.\n`;
+
+describe('answerCheck stale source citations (Phase 5 §1.2)', () => {
+  it('flags a citation stranded on a superseded source as a warning row, ok stays true', () => {
+    const { ctx, repos, sourceId, claimId } = seedKb();
+    const successorId = supersedeWith(ctx, sourceId, DOC_V2);
+    const r = answerCheck(repos, `Refresh tokens rotate on every use.[^${claimId}]`);
+    expect(r.ok).toBe(true);
+    expect(r.inactiveCitations).toHaveLength(0);
+    expect(r.staleSourceCitations).toEqual([
+      { claimId, sourceIds: [sourceId], successorId, quoteSurvives: true },
+    ]);
+  });
+
+  it('reports quoteSurvives false when the quote does not appear in the active successor', () => {
+    const { ctx, repos, sourceId, claimId } = seedKb();
+    const successorId = supersedeWith(ctx, sourceId, DOC_V2_CHANGED);
+    const r = answerCheck(repos, `Refresh tokens rotate on every use.[^${claimId}]`);
+    expect(r.ok).toBe(true);
+    expect(r.staleSourceCitations).toEqual([
+      { claimId, sourceIds: [sourceId], successorId, quoteSurvives: false },
+    ]);
+  });
+
+  it('reports successorId/quoteSurvives null when the source is inactive with no successor', () => {
+    const { repos, sourceId, claimId } = seedKb();
+    repos.sources.setStatus(sourceId, 'retracted');
+    const r = answerCheck(repos, `Refresh tokens rotate on every use.[^${claimId}]`);
+    expect(r.ok).toBe(true);
+    expect(r.staleSourceCitations).toEqual([
+      { claimId, sourceIds: [sourceId], successorId: null, quoteSurvives: null },
+    ]);
+  });
+
+  it('does not flag a claim that keeps at least one active anchor (mixed provenance)', () => {
+    const { ctx, repos, sourceId, leafId, claimId } = seedKb();
+    // Second source carrying the same quotable line; re-applying the same claim text
+    // on the same node attaches the new span to the existing claim.
+    const addendum = new IngestService(ctx).ingest({
+      bytes: Buffer.from('# Auth Addendum\n\nIt still rotates refresh tokens on every use today.\n', 'utf8'),
+      ext: 'md',
+      mediaType: 'text/markdown',
+      originalPath: 'auth-addendum.md',
+    });
+    const chunk = chunkContaining(repos, addendum.source.id, 'rotates refresh tokens');
+    new ClaimService(ctx).apply({
+      source_id: addendum.source.id,
+      claims: [
+        {
+          node_id: leafId,
+          text: 'Refresh tokens rotate on every use.',
+          claim_type: 'fact',
+          confidence: 0.9,
+          spans: [
+            { chunk_id: chunk.id, quote: 'rotates refresh tokens on every use', role: 'supports', confidence: 0.9 },
+          ],
+        },
+      ],
+    });
+    supersedeWith(ctx, sourceId, DOC_V2);
+    const r = answerCheck(repos, `Refresh tokens rotate on every use.[^${claimId}]`);
+    expect(r.ok).toBe(true);
+    expect(r.staleSourceCitations).toEqual([]);
+  });
+
+  it('reports no stale rows for a citation anchored to an active source', () => {
+    const { repos, claimId } = seedKb();
+    const r = answerCheck(repos, `Refresh tokens rotate on every use.[^${claimId}]`);
+    expect(r.ok).toBe(true);
+    expect(r.staleSourceCitations).toEqual([]);
+  });
+});
+
+describe('askContext provenance source status (Phase 5 §2)', () => {
+  it('carries sourceStatus active and supersededBy null for a current source', () => {
+    const { repos, claimId } = seedKb();
+    const res = askContext(repos, 'how are refresh tokens rotated?');
+    const claim = res.claims.find((c) => c.id === claimId)!;
+    expect(claim.provenance[0]?.sourceStatus).toBe('active');
+    expect(claim.provenance[0]?.supersededBy).toBeNull();
+  });
+
+  it('carries sourceStatus superseded and the active successor id after a supersede', () => {
+    const { ctx, repos, sourceId, claimId } = seedKb();
+    const successorId = supersedeWith(ctx, sourceId, DOC_V2);
+    const res = askContext(repos, 'how are refresh tokens rotated?');
+    const claim = res.claims.find((c) => c.id === claimId)!;
+    expect(claim.provenance[0]?.sourceStatus).toBe('superseded');
+    expect(claim.provenance[0]?.supersededBy).toBe(successorId);
+  });
+});
+
+describe('answerCheck (continued)', () => {
   it('neither validates nor counts a citation that appears only inside fenced code', () => {
     const { repos, claimId } = seedKb();
     const answer = [

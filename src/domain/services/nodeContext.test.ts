@@ -272,6 +272,8 @@ describe('buildNodeContext — total ordering (every tie-break asserted)', () =>
       sourceId: SRC_A1,
       sourceTitle: 'Shared Title',
       quoteSnippet: 'tied start, lower span id',
+      sourceStatus: 'active',
+      supersededBy: null,
     });
   });
 
@@ -361,6 +363,36 @@ describe('buildNodeContext — quote snippets', () => {
     } finally {
       long.close();
       rmSync(longDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('buildNodeContext — provenance source status (Phase 5 §2)', () => {
+  it('a span on a superseded source carries sourceStatus and its active successor id', () => {
+    const staleDir = mkdtempSync(join(tmpdir(), 'kb-nodectx-stale-'));
+    const stale = initWorkspace(staleDir).ws;
+    try {
+      stale.repos.tx(() => {
+        stale.repos.sources.insert({ ...source(SRC_A1, 'Old Source'), status: 'superseded' });
+        stale.repos.sources.insert({ ...source(SRC_A2, 'New Source'), supersedesSourceId: SRC_A1 });
+        stale.repos.nodes.insert(node(ROOT, null, 'Root', 'root', 0, 0));
+        stale.repos.claims.upsert(claim(CLM_ROOT, ROOT, 'A dated quote backs this claim.'));
+        stale.repos.spans.upsert(span(makeSpanId('spn_old'), SRC_A1, 0, 10, 'old quote.'));
+        stale.repos.claimSpans.upsert({
+          claimId: CLM_ROOT,
+          spanId: makeSpanId('spn_old'),
+          role: 'supports',
+          confidence: 0.9,
+          extractor: 'agent',
+        });
+      });
+
+      const provenance = buildNodeContext(stale.repos, ROOT)!.data.claims[0]!.provenance[0]!;
+      expect(provenance.sourceStatus).toBe('superseded');
+      expect(provenance.supersededBy).toBe(SRC_A2);
+    } finally {
+      stale.close();
+      rmSync(staleDir, { recursive: true, force: true });
     }
   });
 });

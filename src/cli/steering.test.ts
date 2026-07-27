@@ -47,6 +47,20 @@ describe('steeringFor — table rows', () => {
     expect(s.hints.join(' ')).toContain('kb claim apply --help --json');
   });
 
+  it('ingest ok with stranded claims after --supersedes → re-extract + verify hints (Phase 5 §1.4)', () => {
+    const s = steeringFor('ingest', { ok: true, newSourceId: 'src_2', strandedClaimCount: 3 }, PHASE0);
+    const joined = s.hints.join(' ');
+    expect(joined).toContain('3 claim(s)');
+    expect(joined).toContain('anchored only to the superseded source');
+    expect(joined).toContain('kb source chunks src_2 --json');
+    expect(joined).toContain('kb verify --strict --json');
+  });
+
+  it('a plain ingest (no stranded claims) emits no supersede hint', () => {
+    const s = steeringFor('ingest', { ok: true, newSourceId: 'src_1', strandedClaimCount: 0 }, PHASE0);
+    expect(s.hints.join(' ')).not.toContain('superseded source');
+  });
+
   it('claim apply ok with one stale node → single node show --context, no remainder hint', () => {
     const s = steeringFor('claim apply', { ok: true, staleIds: ['nod_9'] }, PHASE0);
     expect(s.nextActions).toEqual([expect.objectContaining({ command: 'kb node show nod_9 --context --json' })]);
@@ -335,6 +349,8 @@ describe('steeringFor — EVERY row against the FULL current registry (01 §6.1,
   const CASES: Array<{ command: string; state: SteeringState }> = [
     { command: 'init', state: {} },
     { command: 'ingest', state: { ok: true, newSourceId: 'src_1' } },
+    // The supersede row (Phase 5 §1.4) fires only when the receipt reports stranded claims.
+    { command: 'ingest', state: { ok: true, newSourceId: 'src_2', strandedClaimCount: 2 } },
     { command: 'source list', state: { ok: true } },
     { command: 'node create', state: { ok: true, hasSources: false } },
     // `node apply` has three rows: the unconditional ref→nodeId hint plus BOTH

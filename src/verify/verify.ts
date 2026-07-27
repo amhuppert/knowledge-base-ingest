@@ -34,6 +34,7 @@ export const VERIFY_CHECKS = [
   'citation-resolves',
   'parent-cites-subtree',
   'citation-active',
+  'claim-source-current',
   'no-stale-nodes',
   'fts-integrity',
 ] as const;
@@ -186,6 +187,38 @@ export function verify(repos: Repositories, opts?: { strict?: boolean }): Verify
       severity: 'error',
       message: `${inactiveCitations.length} citation(s) reference a superseded/retracted claim`,
       ids: inactiveCitations,
+    });
+  }
+
+  // claim-source-current (Phase 5 §1.3): every active claim with supporting spans
+  // keeps at least ONE span on an ACTIVE source. A claim whose every anchor is
+  // non-active (superseded/retracted/duplicate) is stranded — its provenance is
+  // intact but dated, so this warns rather than errors (strict mode still fails).
+  const sourceStatusCache = new Map<SourceId, string>();
+  const statusOf = (sourceId: SourceId): string => {
+    if (!sourceStatusCache.has(sourceId)) {
+      sourceStatusCache.set(sourceId, repos.sources.getById(sourceId)?.status ?? 'active');
+    }
+    return sourceStatusCache.get(sourceId)!;
+  };
+  const strandedClaims: string[] = [];
+  for (const node of nodes) {
+    for (const claim of claims.listByNode(node.id)) {
+      if (claim.status !== 'active') continue;
+      const supportingSpanIds = new Set(
+        repos.claimSpans.listByClaim(claim.id).filter((cs) => cs.role === 'supports').map((cs) => cs.spanId),
+      );
+      if (supportingSpanIds.size === 0) continue; // claim-has-provenance's finding
+      const spans = repos.claimSpans.spansForClaim(claim.id).filter((s) => supportingSpanIds.has(s.id));
+      if (!spans.some((s) => statusOf(s.sourceId) === 'active')) strandedClaims.push(claim.id);
+    }
+  }
+  if (strandedClaims.length > 0) {
+    findings.push({
+      check: 'claim-source-current',
+      severity: 'warning',
+      message: `${strandedClaims.length} active claim(s) are anchored only to non-active source(s)`,
+      ids: strandedClaims,
     });
   }
 

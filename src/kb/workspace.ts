@@ -26,6 +26,16 @@ export interface Workspace {
   close(): void;
 }
 
+/** How the KB root was resolved (Phase 5 §5) — surfaced by `kb status` so a wrong-KB mistake shows in preflight. */
+export type KbRootVia = 'flag' | 'env' | 'walk-up';
+
+/** Which of the three resolution paths `resolveKbRoot` takes for these inputs. */
+export function kbRootVia(explicit?: string, env: NodeJS.ProcessEnv = process.env): KbRootVia {
+  if (explicit) return 'flag';
+  if (env.KB_DIR) return 'env';
+  return 'walk-up';
+}
+
 /**
  * Find the KB root: an explicit dir, else the `KB_DIR` env var, else walk up from
  * `cwd` looking for a `kb.sqlite`, else `cwd`.

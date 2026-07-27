@@ -164,7 +164,7 @@ export function registerNode(group: Command, ctx: RunContext): void {
       ],
       output: [
         'node, claims owned by the node (with ids to cite during synthesis)',
-        '--context: node (bodyMd + bodyHash included), children [{…, ownClaims: citable claims owned directly}], claims (the whole subtree, active + conflicted, owner-tagged, each with provenance snippets), sources [{ id, title, claimCount: bundle claims quoting it }], allowedCitationIds, stats { descendantNodes, claims, approxTokens, complete }',
+        '--context: node (bodyMd + bodyHash included), children [{…, ownClaims: citable claims owned directly}], claims (the whole subtree, active + conflicted, owner-tagged, each with provenance snippets carrying sourceStatus + supersededBy), sources [{ id, title, claimCount: bundle claims quoting it }], allowedCitationIds, stats { descendantNodes, claims, approxTokens, complete }',
       ],
       sideEffects: [],
       atomic: false,

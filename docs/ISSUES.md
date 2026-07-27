@@ -1,0 +1,9 @@
+1. Real gap — answer-check validates claim status, not source status. clm_ddee458f56d14978 is active and passed validation, but its only provenance span points at sources/0f/0f1c7f7be0adc240.md, which kb/index.md marks superseded by the 2026-07-27 re-ingest. I checked, and the quoted line survives verbatim in the new source, so this answer is sound — but that's luck. Had the reworded impact assessment changed that table row, the citation would have silently gone stale while still reporting ok:true. Suggest answer-check warn on citations whose spans resolve only to superseded sources, and kb verify flag claims stranded on a superseded source after a --supersedes ingest.
+
+2. Doc friction — the "generated markdown is read-only" rule has one useful exception. Source-status (active/superseded) is visible in kb/index.md but not in ask-context or provenance output, which return sourceTitle and storedPath only. Finding #2 was only catchable because I'd read the index before invoking the skill. Either surface sourceStatus in the provenance payload, or tell the skill to check the index when a citation's storedPath matters.
+
+3. Minor — provenance output shape isn't documented in the skill. I guessed data.spans vs data.provenance and had to write a defensive fallback into my parsing. It's data.provenance. Worth one line in the cheatsheet.
+
+4. Minor — no worked payload example for answer-check. The skill correctly says to fetch the shape from --help --json, and that works ({answer, claim_ids}). But the claim_ids array duplicates every id already inline in the answer text, which is easy to get out of sync by hand. Consider deriving claim_ids from the text when omitted.
+
+5. Minor friction: the CLI requires repeating a long absolute --kb path; exporting KB_DIR is the practical workaround.

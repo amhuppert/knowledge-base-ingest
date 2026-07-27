@@ -8,7 +8,7 @@ import { IngestService } from '../domain/services/ingestService.js';
 import { ClaimService } from '../domain/services/claimService.js';
 import { NodeService } from '../domain/services/nodeService.js';
 import type { Chunk } from '../domain/schemas/models.js';
-import type { SourceId } from '../domain/ids.js';
+import { makeClaimId, makeNodeId, type SourceId } from '../domain/ids.js';
 import { verify } from './verify.js';
 
 const DOC = [
@@ -56,7 +56,7 @@ function chunkContaining(repos: Repositories, sourceId: SourceId, needle: string
  * Seed a fully-consistent KB: ingest a source, build root+leaf, apply a
  * quote-verified claim to the leaf, then synthesize the leaf citing that claim.
  */
-function seedConsistentKb(): { ctx: ServiceContext; repos: Repositories; claimId: string; leafId: string } {
+function seedConsistentKb(): { ctx: ServiceContext; repos: Repositories; sourceId: SourceId; claimId: string; leafId: string } {
   const { ctx, repos } = makeCtx();
   const sourceId = ingestDoc(ctx);
   const root = new NodeService(ctx).createNode({ parentId: null, title: 'Auth', kind: 'root' }).node;
@@ -83,7 +83,7 @@ function seedConsistentKb(): { ctx: ServiceContext; repos: Repositories; claimId
     node_id: leaf.id,
     body_md: `Refresh tokens rotate on every use.[^${claim.id}]`,
   });
-  return { ctx, repos, claimId: claim.id, leafId: leaf.id };
+  return { ctx, repos, sourceId, claimId: claim.id, leafId: leaf.id };
 }
 
 function findingsFor(report: ReturnType<typeof verify>, check: string) {
@@ -158,5 +158,71 @@ describe('verify', () => {
     expect(strictReport.errors).toBe(0);
     expect(strictReport.warnings).toBeGreaterThan(0);
     expect(strictReport.ok).toBe(false);
+  });
+});
+
+describe('claim-source-current (Phase 5 §1.3)', () => {
+  it('a consistent KB with an active source raises no finding', () => {
+    const { repos } = seedConsistentKb();
+    expect(findingsFor(verify(repos), 'claim-source-current')).toHaveLength(0);
+  });
+
+  it('warns when an active claim is anchored only to a superseded source; strict fails', () => {
+    const { ctx, repos, sourceId, claimId } = seedConsistentKb();
+    new IngestService(ctx).ingest({
+      bytes: Buffer.from(`${DOC}\n\n## Change Log\n\nRe-issued after review.\n`, 'utf8'),
+      ext: 'md',
+      mediaType: 'text/markdown',
+      originalPath: 'auth-v2.md',
+      supersedes: sourceId,
+    });
+
+    const report = verify(repos);
+    const findings = findingsFor(report, 'claim-source-current');
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.severity).toBe('warning');
+    expect(findings[0]!.ids).toContain(claimId);
+    // Non-strict: a warning does not fail the run.
+    expect(report.errors).toBe(0);
+    expect(report.ok).toBe(true);
+    // Strict: it does.
+    expect(verify(repos, { strict: true }).ok).toBe(false);
+  });
+
+  it('does not flag a claim that keeps one active anchor (mixed provenance)', () => {
+    const { ctx, repos, sourceId, leafId, claimId } = seedConsistentKb();
+    // A second, active source carrying the same quotable line; re-applying the same
+    // claim text on the same node attaches the new span to the existing claim.
+    const addendum = new IngestService(ctx).ingest({
+      bytes: Buffer.from('# Auth Addendum\n\nIt still rotates refresh tokens on every use today.\n', 'utf8'),
+      ext: 'md',
+      mediaType: 'text/markdown',
+      originalPath: 'auth-addendum.md',
+    });
+    const chunk = chunkContaining(repos, addendum.source.id, 'rotates refresh tokens');
+    new ClaimService(ctx).apply({
+      source_id: addendum.source.id,
+      claims: [
+        {
+          node_id: makeNodeId(leafId),
+          text: 'Refresh tokens rotate on every use.',
+          claim_type: 'fact',
+          confidence: 0.9,
+          spans: [{ chunk_id: chunk.id, quote: 'rotates refresh tokens on every use', role: 'supports', confidence: 0.9 }],
+        },
+      ],
+    });
+    new IngestService(ctx).ingest({
+      bytes: Buffer.from(`${DOC}\n\n## Change Log\n\nRe-issued after review.\n`, 'utf8'),
+      ext: 'md',
+      mediaType: 'text/markdown',
+      originalPath: 'auth-v2.md',
+      supersedes: sourceId,
+    });
+
+    const report = verify(repos);
+    expect(findingsFor(report, 'claim-source-current')).toHaveLength(0);
+    // The claim under test is genuinely still active and multi-anchored.
+    expect(repos.claimSpans.spansForClaim(makeClaimId(claimId)).length).toBeGreaterThan(1);
   });
 });
