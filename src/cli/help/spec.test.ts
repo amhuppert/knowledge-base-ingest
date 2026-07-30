@@ -4,7 +4,13 @@ import { buildProgram } from '../program.js';
 import { collectLeaves } from './globalHelp.js';
 import { helpSpecOf, renderHelpText, WORKFLOW_GROUPS } from './spec.js';
 import type { CliIo } from '../io.js';
-import { NODE_KINDS, SOURCE_STATUSES, CLAIM_TYPES, TEXT_VERIFICATIONS } from '../../domain/schemas/enums.js';
+import {
+  NODE_KINDS,
+  SOURCE_STATUSES,
+  CLAIM_TYPES,
+  CLAIM_STATUSES,
+  TEXT_VERIFICATIONS,
+} from '../../domain/schemas/enums.js';
 import { SEARCH_SCOPES, MATCH_MODES } from '../../query/query.js';
 import {
   ClaimApplySchema,
@@ -64,6 +70,7 @@ const ENUM_CONSTS: Array<readonly string[]> = [
   MATCH_MODES,
   SOURCE_STATUSES,
   CLAIM_TYPES,
+  CLAIM_STATUSES,
   TEXT_VERIFICATIONS,
 ];
 
@@ -144,6 +151,7 @@ describe('help specs (drift)', () => {
     expect(choicesOf('search', '--match <mode>')).toEqual(MATCH_MODES);
     expect(choicesOf('ask-context', '--claim-type <type>')).toEqual(CLAIM_TYPES);
     expect(choicesOf('source list', '--status <status>')).toEqual(SOURCE_STATUSES);
+    expect(choicesOf('relationship list', '--status <status>')).toEqual(CLAIM_STATUSES);
     expect(choicesOf('ingest', '--verification <mode>')).toEqual(TEXT_VERIFICATIONS);
   });
 

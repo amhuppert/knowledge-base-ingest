@@ -90,4 +90,14 @@ describe('gen-command-docs (07 §4)', () => {
     const missing = help.data.commands.filter((cmd) => !body.includes(`kb ${cmd}`));
     expect(missing).toEqual([]);
   });
+
+  it('keeps the hand-authored synthesize payload aligned with the required body hash contract', () => {
+    const manualStart = generated.indexOf('### `synthesize`', generated.indexOf(END));
+    const manualEnd = generated.indexOf('### `answer-check`', manualStart);
+    const manual = generated.slice(manualStart, manualEnd);
+
+    expect(manual).toContain('"expected_body_hash"');
+    expect(manual).toContain('kb node show <node_id> --context --json');
+    expect(manual).toContain('bodyHash');
+  });
 });

@@ -62,6 +62,11 @@ async function applyClaim(nodeId: string, text: string): Promise<string> {
   return (shown.json.data as { claims: Array<{ id: string }> }).claims[0]!.id;
 }
 
+async function nodeState(nodeId: string): Promise<{ bodyMd: string; bodyHash: string }> {
+  const shown = await runIo(['node', 'show', nodeId, '--context']);
+  return (shown.json.data as { node: { bodyMd: string; bodyHash: string } }).node;
+}
+
 beforeEach(async () => {
   kb = mkdtempSync(join(tmpdir(), 'kb-synth-'));
   await runIo(['init', kb]);
@@ -78,12 +83,121 @@ beforeEach(async () => {
 afterEach(() => rmSync(kb, { recursive: true, force: true }));
 
 describe('synthesize receipt (03 §3.3)', () => {
+  it.each([false, true])('requires expected_body_hash in %s mode', async (dryRun) => {
+    const rootId = await createNode('Root', 'root');
+    const file = writePayload({ node_id: rootId, body_md: 'Overview.' });
+    const r = await runIo(['synthesize', '--file', file, ...(dryRun ? ['--dry-run'] : [])]);
+
+    expect(r.code).toBe(1);
+    expect(r.json.issues).toEqual([
+      expect.objectContaining({ code: 'PAYLOAD_SCHEMA', path: 'expected_body_hash' }),
+    ]);
+  });
+
+  it.each([false, true])('rejects a stale expected_body_hash in %s mode with a re-read hint', async (dryRun) => {
+    const rootId = await createNode('Root', 'root');
+    const before = await nodeState(rootId);
+    const first = writePayload({
+      node_id: rootId,
+      body_md: 'First version.',
+      expected_body_hash: before.bodyHash,
+    });
+    expect((await runIo(['synthesize', '--file', first])).code).toBe(0);
+
+    const stale = writePayload({
+      node_id: rootId,
+      body_md: 'Second version.',
+      expected_body_hash: before.bodyHash,
+    });
+    const r = await runIo(['synthesize', '--file', stale, ...(dryRun ? ['--dry-run'] : [])]);
+
+    expect(r.code).toBe(1);
+    expect(r.json.issues).toEqual([
+      expect.objectContaining({
+        code: 'BODY_HASH_MISMATCH',
+        hint: `Re-read the node: kb node show ${rootId} --context --json`,
+      }),
+    ]);
+    expect((await nodeState(rootId)).bodyMd).toBe('First version.');
+  });
+
+  it('reports bodyDelta and warns without failing when a current citation is removed in dry-run and apply', async () => {
+    const rootId = await createNode('Root', 'root');
+    const claimId = await applyClaim(rootId, 'The widget service caches in Redis.');
+    const initialBody = `Caches in Redis.[^${claimId}]`;
+    const initial = writePayload({
+      node_id: rootId,
+      body_md: initialBody,
+      expected_body_hash: (await nodeState(rootId)).bodyHash,
+    });
+    expect((await runIo(['synthesize', '--file', initial])).code).toBe(0);
+
+    const replacement = 'Caches in Redis.';
+    const file = writePayload({
+      node_id: rootId,
+      body_md: replacement,
+      expected_body_hash: (await nodeState(rootId)).bodyHash,
+    });
+    const dry = await runIo(['synthesize', '--file', file, '--dry-run']);
+    const applied = await runIo(['synthesize', '--file', file]);
+
+    for (const r of [dry, applied]) {
+      expect(r.code).toBe(0);
+      expect(r.json.ok).toBe(true);
+      expect(r.json.data?.['bodyDelta']).toEqual({
+        charsBefore: initialBody.length,
+        charsAfter: replacement.length,
+        citationsAdded: [],
+        citationsRemoved: [claimId],
+        removedCurrent: [claimId],
+      });
+      expect(r.json.issues).toEqual([
+        expect.objectContaining({
+          code: 'CITATIONS_REMOVED',
+          severity: 'warning',
+          ids: [claimId],
+        }),
+      ]);
+    }
+  });
+
+  it('keeps the unchanged happy path and reports an empty bodyDelta', async () => {
+    const rootId = await createNode('Root', 'root');
+    const body = 'Overview.';
+    const first = writePayload({
+      node_id: rootId,
+      body_md: body,
+      expected_body_hash: (await nodeState(rootId)).bodyHash,
+    });
+    expect((await runIo(['synthesize', '--file', first])).code).toBe(0);
+
+    const repeat = writePayload({
+      node_id: rootId,
+      body_md: body,
+      expected_body_hash: (await nodeState(rootId)).bodyHash,
+    });
+    const r = await runIo(['synthesize', '--file', repeat]);
+
+    expect(r.code).toBe(0);
+    expect(r.json.data).toMatchObject({
+      outcome: 'unchanged',
+      bodyDelta: {
+        charsBefore: body.length,
+        charsAfter: body.length,
+        citationsAdded: [],
+        citationsRemoved: [],
+        removedCurrent: [],
+      },
+    });
+    expect(r.json.issues).toEqual([]);
+  });
+
   it('carries nodeId/outcome/staleNodes plus the deprecated updated/unchanged/missingCitations aliases', async () => {
     const rootId = await createNode('Root', 'root');
     const leafId = await createNode('Caching', 'leaf', rootId);
     const claimId = await applyClaim(leafId, 'The widget service caches in Redis.');
 
-    const file = writePayload({ node_id: leafId, body_md: `Caches in Redis.[^${claimId}]` });
+    const file = writePayload({ node_id: leafId, expected_body_hash: (await nodeState(leafId)).bodyHash, body_md: `Caches in Redis.[^${claimId}]` });
     const r = await runIo(['synthesize', '--file', file]);
 
     expect(r.code).toBe(0);
@@ -106,7 +220,7 @@ describe('synthesize steering (01 §6.1)', () => {
     const leafId = await createNode('Caching', 'leaf', rootId);
     const claimId = await applyClaim(leafId, 'The widget service caches in Redis.');
 
-    const file = writePayload({ node_id: leafId, body_md: `Caches in Redis.[^${claimId}]` });
+    const file = writePayload({ node_id: leafId, expected_body_hash: (await nodeState(leafId)).bodyHash, body_md: `Caches in Redis.[^${claimId}]` });
     const r = await runIo(['synthesize', '--file', file]);
 
     expect(r.code).toBe(0);
@@ -119,7 +233,7 @@ describe('synthesize steering (01 §6.1)', () => {
     const rootId = await createNode('Root', 'root');
     const claimId = await applyClaim(rootId, 'The widget service caches in Redis.');
 
-    const file = writePayload({ node_id: rootId, body_md: `Caches in Redis.[^${claimId}]` });
+    const file = writePayload({ node_id: rootId, expected_body_hash: (await nodeState(rootId)).bodyHash, body_md: `Caches in Redis.[^${claimId}]` });
     const r = await runIo(['synthesize', '--file', file]);
 
     expect(r.code).toBe(0);
@@ -133,7 +247,7 @@ describe('synthesize steering (01 §6.1)', () => {
     const leafB = await createNode('Bravo', 'leaf', rootId);
     const claimB = await applyClaim(leafB, 'The widget service caches in Redis.');
 
-    const file = writePayload({ node_id: leafA, body_md: `Cross-cite.[^${claimB}]` });
+    const file = writePayload({ node_id: leafA, expected_body_hash: (await nodeState(leafA)).bodyHash, body_md: `Cross-cite.[^${claimB}]` });
     const r = await runIo(['synthesize', '--file', file]);
 
     expect(r.code).toBe(1);

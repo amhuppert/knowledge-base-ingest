@@ -4,6 +4,7 @@ import { SpanRepo, ClaimSpanRepo, RelationshipSpanRepo } from './provenance.js';
 import { NodeRepo, ClaimRepo } from './synthesis.js';
 import { EntityRepo, RelationshipRepo } from './graph.js';
 import { ChangelogRepo, RenderedFileRepo } from './ops.js';
+import { SourceContributionRepository } from './sourceContribution.js';
 
 /** All repositories for a connection, constructed once and passed to services. */
 export class Repositories {
@@ -19,6 +20,7 @@ export class Repositories {
   readonly relationships: RelationshipRepo;
   readonly changelog: ChangelogRepo;
   readonly renderedFiles: RenderedFileRepo;
+  readonly sourceContribution: SourceContributionRepository;
 
   constructor(readonly db: Db) {
     this.sources = new SourceRepo(db);
@@ -33,6 +35,7 @@ export class Repositories {
     this.relationships = new RelationshipRepo(db);
     this.changelog = new ChangelogRepo(db);
     this.renderedFiles = new RenderedFileRepo(db);
+    this.sourceContribution = new SourceContributionRepository(db);
   }
 
   /** Run `fn` inside a single transaction with BEGIN IMMEDIATE (write lock taken up front). */
@@ -46,3 +49,4 @@ export * from './provenance.js';
 export * from './synthesis.js';
 export * from './graph.js';
 export * from './ops.js';
+export * from './sourceContribution.js';

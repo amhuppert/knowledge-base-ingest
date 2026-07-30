@@ -141,6 +141,7 @@ describe('validateSynthesis — per-citation precedence', () => {
     const { repos, topicA, activeLeaf, conflictedA } = seed();
     const v = validateSynthesis(repos, {
       node_id: topicA,
+      expected_body_hash: '',
       body_md: `A[^${activeLeaf}] and B[^${conflictedA}].`,
     });
     expect(v.issues).toEqual([]);
@@ -149,7 +150,7 @@ describe('validateSynthesis — per-citation precedence', () => {
 
   it('an unknown cited id → CITATION_UNKNOWN with the id and body_md path', () => {
     const { repos, topicA } = seed();
-    const v = validateSynthesis(repos, { node_id: topicA, body_md: 'X[^clm_deadbeefdeadbeef].' });
+    const v = validateSynthesis(repos, { node_id: topicA, expected_body_hash: '', body_md: 'X[^clm_deadbeefdeadbeef].' });
     expect(v.issues).toHaveLength(1);
     expect(v.issues[0]!.code).toBe('CITATION_UNKNOWN');
     expect(v.issues[0]!.path).toBe('body_md');
@@ -158,7 +159,7 @@ describe('validateSynthesis — per-citation precedence', () => {
 
   it('an in-subtree superseded claim → CITATION_INACTIVE naming the superseding claim in the hint', () => {
     const { repos, topicA, supersededLeaf, activeLeaf } = seed();
-    const v = validateSynthesis(repos, { node_id: topicA, body_md: `X[^${supersededLeaf}].` });
+    const v = validateSynthesis(repos, { node_id: topicA, expected_body_hash: '', body_md: `X[^${supersededLeaf}].` });
     expect(v.issues).toHaveLength(1);
     expect(v.issues[0]!.code).toBe('CITATION_INACTIVE');
     expect(v.issues[0]!.ids).toEqual([supersededLeaf]);
@@ -167,14 +168,14 @@ describe('validateSynthesis — per-citation precedence', () => {
 
   it('a retracted claim → CITATION_INACTIVE (no superseding claim set)', () => {
     const { repos, topicA, retractedLeaf } = seed();
-    const v = validateSynthesis(repos, { node_id: topicA, body_md: `X[^${retractedLeaf}].` });
+    const v = validateSynthesis(repos, { node_id: topicA, expected_body_hash: '', body_md: `X[^${retractedLeaf}].` });
     expect(v.issues).toHaveLength(1);
     expect(v.issues[0]!.code).toBe('CITATION_INACTIVE');
   });
 
   it('an active out-of-subtree claim → CITATION_OUT_OF_SUBTREE with [claimId, owningNodeId] and the owning node title in the hint', () => {
     const { repos, topicA, topicB, activeB } = seed();
-    const v = validateSynthesis(repos, { node_id: topicA, body_md: `X[^${activeB}].` });
+    const v = validateSynthesis(repos, { node_id: topicA, expected_body_hash: '', body_md: `X[^${activeB}].` });
     expect(v.issues).toHaveLength(1);
     expect(v.issues[0]!.code).toBe('CITATION_OUT_OF_SUBTREE');
     expect(v.issues[0]!.ids).toEqual([activeB, topicB]);
@@ -183,7 +184,7 @@ describe('validateSynthesis — per-citation precedence', () => {
 
   it('a claim that is BOTH inactive AND out-of-subtree yields only CITATION_INACTIVE (INACTIVE dominates)', () => {
     const { repos, topicA, supersededB, activeB } = seed();
-    const v = validateSynthesis(repos, { node_id: topicA, body_md: `X[^${supersededB}].` });
+    const v = validateSynthesis(repos, { node_id: topicA, expected_body_hash: '', body_md: `X[^${supersededB}].` });
     expect(v.issues).toHaveLength(1);
     expect(v.issues[0]!.code).toBe('CITATION_INACTIVE');
     // The superseding claim is named in the hint; no OUT_OF_SUBTREE issue is emitted.
@@ -193,7 +194,7 @@ describe('validateSynthesis — per-citation precedence', () => {
 
   it('emits exactly one issue per distinct cited id (a repeated bad citation is not double-counted)', () => {
     const { repos, topicA, topicB, activeB } = seed();
-    const v = validateSynthesis(repos, { node_id: topicA, body_md: `X[^${activeB}] then again [^${activeB}].` });
+    const v = validateSynthesis(repos, { node_id: topicA, expected_body_hash: '', body_md: `X[^${activeB}] then again [^${activeB}].` });
     expect(v.issues).toHaveLength(1);
     expect(v.issues[0]!.ids).toEqual([activeB, topicB]);
   });
@@ -202,7 +203,7 @@ describe('validateSynthesis — per-citation precedence', () => {
     const { repos, topicA, activeB, supersededLeaf } = seed();
     // activeB (OUT_OF_SUBTREE) occurs first, then an unknown id, then supersededLeaf (INACTIVE).
     const body = `First[^${activeB}], mid[^clm_deadbeefdeadbeef], last[^${supersededLeaf}].`;
-    const v = validateSynthesis(repos, { node_id: topicA, body_md: body });
+    const v = validateSynthesis(repos, { node_id: topicA, expected_body_hash: '', body_md: body });
     expect(v.issues.map((i) => i.code)).toEqual([
       'CITATION_OUT_OF_SUBTREE',
       'CITATION_UNKNOWN',

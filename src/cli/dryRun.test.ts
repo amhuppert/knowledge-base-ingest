@@ -126,7 +126,7 @@ describe('inDryRunTx', () => {
     const { ctx, repos } = makeCtx();
     const { sourceId, leafId, chunkId } = seed(ctx, repos);
     // Clear the leaf's initial stale flag so a leaked staleness write would be visible.
-    new NodeService(ctx).synthesize({ node_id: leafId, body_md: 'Placeholder.' });
+    new NodeService(ctx).synthesize({ node_id: leafId, expected_body_hash: '', body_md: 'Placeholder.' });
     expect(repos.nodes.getById(leafId)?.isStale).toBe(false);
 
     inDryRunTx(repos, () => new ClaimService(ctx).apply(claimPayload(sourceId, leafId, chunkId)));

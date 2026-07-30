@@ -35,10 +35,16 @@ export const ISSUE_CODES = [
   'QUOTE_AMBIGUOUS',
   'CLAIM_HAS_PROVENANCE',
 
+  // --- Graph vocabulary diagnostics ---
+  'GRAPH_TYPE_NEW',
+  'GRAPH_TYPE_NEAR_MISS',
+
   // --- Citations (synthesize, verify) ---
   'CITATION_UNKNOWN',
   'CITATION_OUT_OF_SUBTREE',
   'CITATION_INACTIVE',
+  'BODY_HASH_MISMATCH',
+  'CITATIONS_REMOVED',
   // Phase 5: a claim/citation whose every supporting span anchors to a non-active source.
   'PROVENANCE_SOURCE_INACTIVE',
 

@@ -72,6 +72,32 @@ describe('steeringFor — table rows', () => {
     expect(s.nextActions).toEqual([expect.objectContaining({ command: 'kb verify --strict --json' })]);
   });
 
+  it('claim apply dry-run with candidates emits one registry-filtered adjudication hint', () => {
+    const state: SteeringState = {
+      ok: true,
+      dryRun: {
+        command: 'kb claim apply --file c.json --json',
+        payloadFrom: 'file',
+      },
+      hasReviewCandidates: true,
+    };
+    const registered = steeringFor(
+      'claim apply',
+      state,
+      registry('claim apply', 'claim supersede', 'claim conflict'),
+    );
+    expect(registered.hints).toEqual([
+      'Review candidates via kb claim supersede / kb claim conflict, or accept coexistence.',
+    ]);
+
+    const filtered = steeringFor(
+      'claim apply',
+      state,
+      registry('claim apply', 'claim supersede'),
+    );
+    expect(filtered.hints).toEqual([]);
+  });
+
   it('synthesize ok with zero stale (a batch cleared the last stale node) → verify --strict', () => {
     // A batch synthesize reports the post-apply stale set on the same `synthesize` row, so
     // clearing the LAST stale node in one payload lands on the terminal verify action (04 §3).
@@ -108,23 +134,40 @@ describe('steeringFor — table rows', () => {
     expect(s.hints.join(' ')).toContain('kb entity show <id> --json');
   });
 
-  it('graph apply offers entity list alongside entity show, and drops it when unregistered', () => {
-    const both = steeringFor(
+  it('graph apply offers exactly one source-scoped relationship-list hint and registry-filters it', () => {
+    const registered = steeringFor(
       'graph apply',
-      { ok: true, firstEntityId: 'ent_1' },
+      { ok: true, sourceId: 'src_1' },
+      registry('graph apply', 'relationship list', 'entity show', 'entity list'),
+    );
+    expect(registered).toEqual({
+      nextActions: [],
+      hints: ['kb relationship list --source src_1 --json'],
+    });
+
+    const unregistered = steeringFor(
+      'graph apply',
+      { ok: true, sourceId: 'src_1' },
       registry('graph apply', 'entity show', 'entity list'),
     );
-    expect(both.hints.join(' ')).toContain('kb entity show ent_1 --json');
-    expect(both.hints.join(' ')).toContain('kb entity list --json');
+    expect(unregistered).toEqual({ nextActions: [], hints: [] });
+  });
 
-    // Phase-aware: without `entity list` registered, only the show hint survives.
-    const showOnly = steeringFor(
-      'graph apply',
-      { ok: true, firstEntityId: 'ent_1' },
-      registry('graph apply', 'entity show'),
-    );
-    expect(showOnly.hints.join(' ')).toContain('kb entity show ent_1 --json');
-    expect(showOnly.hints.join(' ')).not.toContain('kb entity list');
+  it('coverage offers the relationship review only when scoped, with no relationship-list back-pointer', () => {
+    const reg = registry('coverage', 'relationship list');
+
+    expect(steeringFor('coverage', { ok: true, scopedSourceId: 'src_1' }, reg)).toEqual({
+      nextActions: [],
+      hints: ['kb relationship list --source src_1 --json'],
+    });
+    expect(steeringFor('coverage', { ok: true }, reg)).toEqual({
+      nextActions: [],
+      hints: [],
+    });
+    expect(steeringFor('relationship list', { ok: true }, reg)).toEqual({
+      nextActions: [],
+      hints: [],
+    });
   });
 
   it('verify ok → render next-action; the coverage hint is withheld until coverage ships', () => {
@@ -245,11 +288,11 @@ describe('steeringFor — node show --context (04 §1)', () => {
 
 describe('steeringFor — dry-run rows are EXCLUSIVE (03 §2)', () => {
   // Representative receipt state that WOULD trigger real-apply follow-ups if the
-  // normal rows fired: a new source id, stale nodes, entity ids. A dry-run must
+  // normal rows fired: a new source id, stale nodes, graph source id. A dry-run must
   // steer only to the replay action for each of the five dry-run commands.
   const receiptState: Record<string, SteeringState> = {
     'claim apply': { ok: true, staleIds: ['nod_a', 'nod_b'] },
-    graph: { ok: true, firstEntityId: 'ent_1' },
+    graph: { ok: true, sourceId: 'src_1' },
     synthesize: { ok: true, staleIds: ['nod_a'] },
     'node apply': { ok: true, hasSources: false },
     ingest: { ok: true, newSourceId: 'src_1' },
@@ -352,6 +395,10 @@ describe('steeringFor — EVERY row against the FULL current registry (01 §6.1,
     // The supersede row (Phase 5 §1.4) fires only when the receipt reports stranded claims.
     { command: 'ingest', state: { ok: true, newSourceId: 'src_2', strandedClaimCount: 2 } },
     { command: 'source list', state: { ok: true } },
+    {
+      command: 'source impact',
+      state: { ok: true, sourceId: 'src_1', staleIds: ['nod_deepest'] },
+    },
     { command: 'node create', state: { ok: true, hasSources: false } },
     // `node apply` has three rows: the unconditional ref→nodeId hint plus BOTH
     // hasSources branches (04 §2), so each branch needs its own case.
@@ -364,7 +411,8 @@ describe('steeringFor — EVERY row against the FULL current registry (01 §6.1,
     { command: 'claim apply', state: { ok: true, staleIds: ['nod_a', 'nod_b'] } },
     { command: 'claim apply', state: { ok: true, staleIds: [] } },
     { command: 'claim apply', state: { ok: false, quoteIssue: true, sourceId: 'src_1' } },
-    { command: 'graph apply', state: { ok: true, firstEntityId: 'ent_1' } },
+    { command: 'graph apply', state: { ok: true, sourceId: 'src_1' } },
+    { command: 'coverage', state: { ok: true, scopedSourceId: 'src_1' } },
     // `entity list` (eval run 1, finding 3) — its hint carries an <id> placeholder.
     { command: 'entity list', state: { ok: true } },
     { command: 'synthesize', state: { ok: true, staleIds: ['nod_a'] } },
@@ -373,6 +421,17 @@ describe('steeringFor — EVERY row against the FULL current registry (01 §6.1,
     { command: 'render', state: { ok: true } },
     // Dry-run rows: file + stdin for every one of the five payload commands.
     dryRun('claim apply', 'file', 'kb claim apply --file c.json --json'),
+    {
+      command: 'claim apply',
+      state: {
+        ok: true,
+        dryRun: {
+          command: 'kb claim apply --file c.json --json',
+          payloadFrom: 'file',
+        },
+        hasReviewCandidates: true,
+      },
+    },
     dryRun('claim apply', 'stdin', 'kb claim apply --json'),
     dryRun('graph apply', 'file', 'kb graph apply --file g.json --json'),
     dryRun('graph apply', 'stdin', 'kb graph apply --json'),

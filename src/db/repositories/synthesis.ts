@@ -192,7 +192,7 @@ export class ClaimRepo {
       .map((r) => ClaimRow.parse(r));
   }
 
-  listBySource(sourceId: SourceId): Claim[] {
+  listFirstSeenBySource(sourceId: SourceId): Claim[] {
     return this.db
       .prepare('SELECT * FROM claims WHERE first_seen_source_id = ? ORDER BY created_at, id')
       .all(sourceId)

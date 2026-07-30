@@ -83,9 +83,9 @@ function build(order: 'ab' | 'ba'): Repositories {
     }),
   );
 
-  new NodeService(ctx).synthesize({ node_id: tokens.id, body_md: `Rotation.[^${repos.claims.listByNode(tokens.id)[0]!.id}]` });
-  new NodeService(ctx).synthesize({ node_id: storage.id, body_md: `Storage.[^${repos.claims.listByNode(storage.id)[0]!.id}]` });
-  new NodeService(ctx).synthesize({ node_id: root.id, body_md: 'Overview.' });
+  new NodeService(ctx).synthesize({ node_id: tokens.id, expected_body_hash: '', body_md: `Rotation.[^${repos.claims.listByNode(tokens.id)[0]!.id}]` });
+  new NodeService(ctx).synthesize({ node_id: storage.id, expected_body_hash: '', body_md: `Storage.[^${repos.claims.listByNode(storage.id)[0]!.id}]` });
+  new NodeService(ctx).synthesize({ node_id: root.id, expected_body_hash: '', body_md: 'Overview.' });
   return repos;
 }
 

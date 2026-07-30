@@ -6,7 +6,7 @@
 
 import type { Command } from 'commander';
 import type { z } from 'zod';
-import { success } from '../output.js';
+import { success, type Issue } from '../output.js';
 import { leaf, readPayload, workspaceAction, type RunContext } from '../run.js';
 import { defineHelp } from '../help/spec.js';
 import { formatPath } from '../issues.js';
@@ -19,6 +19,7 @@ import {
   type SynthesizeBatch,
 } from '../../domain/schemas/agent.js';
 import { DomainIssuesError, type DomainIssue } from '../../domain/issueCodes.js';
+import type { SynthesizeBatchReceipt, SynthesizeReceipt } from '../../domain/services/nodeService.js';
 
 /** A Zod issue as a coded `PAYLOAD_SCHEMA` diagnostic with the canonical bracket-dot path. */
 function payloadSchemaIssue(issue: z.ZodIssue): DomainIssue {
@@ -49,6 +50,23 @@ export function parseSynthesizePayload(raw: unknown): Synthesize | SynthesizeBat
   throw new DomainIssuesError(parsed.error.issues.map(payloadSchemaIssue));
 }
 
+function citationRemovalIssues(receipt: SynthesizeReceipt | SynthesizeBatchReceipt): Issue[] {
+  const nodes =
+    'nodes' in receipt
+      ? receipt.nodes
+      : [{ nodeId: receipt.nodeId, bodyDelta: receipt.bodyDelta }];
+  return nodes.flatMap(({ nodeId, bodyDelta }) =>
+    bodyDelta.removedCurrent.length === 0
+      ? []
+      : [{
+          code: 'CITATIONS_REMOVED',
+          severity: 'warning' as const,
+          message: `Node ${nodeId} removed citations to current claims: ${bodyDelta.removedCurrent.join(', ')}`,
+          ids: bodyDelta.removedCurrent,
+        }],
+  );
+}
+
 export function registerSynthesize(program: Command, ctx: RunContext): void {
   defineHelp(
     leaf(program, 'synthesize', 'Set node prose with inline claim citations and clear that node stale flag.', {
@@ -65,13 +83,19 @@ export function registerSynthesize(program: Command, ctx: RunContext): void {
         schema: 'SynthesizePayloadSchema',
         example: {
           node_id: 'nod_1a2b3c',
+          expected_body_hash: '8f50d2d8f6f3...',
           title: 'Caching strategy',
           body_md: 'The service caches responses for 60s [^clm_1a2b3c].',
         },
+        notes: [
+          'expected_body_hash must be the bodyHash returned by kb node show <node_id> --context --json.',
+        ],
       },
       output: [
-        'single payload: nodeId, outcome (updated | unchanged | stale-cleared)',
-        `batch payload: nodes[] (inputIndex, nodeId, depth, outcome) in apply order + totals`,
+        'single payload: nodeId, outcome (updated | unchanged | stale-cleared), bodyDelta',
+        `batch payload: nodes[] (inputIndex, nodeId, depth, outcome, bodyDelta) in apply order + totals`,
+        'bodyDelta: charsBefore, charsAfter, citationsAdded, citationsRemoved, removedCurrent',
+        'CITATIONS_REMOVED warning: diagnostic ids for removed current-claim citations; it does not make the command fail',
         'staleNodes (nodes still needing synthesis, deepest-first)',
       ],
       sideEffects: [
@@ -99,13 +123,14 @@ export function registerSynthesize(program: Command, ctx: RunContext): void {
       (ws, { opts }) => {
         const payload = parseSynthesizePayload(readPayload(opts));
         const receipt = 'nodes' in payload ? ws.nodes.synthesizeBatch(payload) : ws.nodes.synthesize(payload);
+        const issues = citationRemovalIssues(receipt);
         // Steer per the normative table (01 §6.1): stale nodes remain → point at them
         // (deepest-first); none remain → suggest a verify. A batch reports the same
         // post-apply stale set, so clearing the last stale node lands on verify (04 §3).
         // On a dry-run this is discarded by the foundation runner in favor of the
         // exclusive dry-run steering (03 §2).
         const steering = steeringFor('synthesize', { ok: true, staleIds: receipt.staleNodes }, ctx.registry);
-        return success(receipt, { nextActions: steering.nextActions, hints: steering.hints });
+        return success(receipt, { issues, nextActions: steering.nextActions, hints: steering.hints });
       },
       { dryRunCommand: 'synthesize' },
     ),

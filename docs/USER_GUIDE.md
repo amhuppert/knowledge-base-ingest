@@ -301,7 +301,8 @@ kb source chunks <source_id>
 **Output**
 
 - sourceId
-- chunks: [{ id, chunkIndex, headingPath, text }] — copy quotes verbatim from text
+- chunks: [{ id, chunkIndex, headingPath, text, contentKind }] — copy quotes verbatim from text
+- chunks with contentKind 'structural' (heading-only) need no claim extraction
 
 **Examples**
 
@@ -310,7 +311,47 @@ kb source chunks <source_id>
 kb source chunks src_1a2b3c --json
 ```
 
-*Related:* `kb source show` · `kb claim apply`
+*Related:* `kb source show` · `kb claim apply` · `kb relationship list`
+
+#### `kb source impact`
+
+Summarize what one source contributed, then optionally return one affected node’s synthesis working set.
+
+```text
+kb source impact <source_id> [--node <node_id>]
+```
+
+*When:* Inspect a compact source contribution first, then select a stale affected node for a synthesis-ready drill-down.
+
+| Argument | Description |
+|---|---|
+| `source_id` | the source id (src_…) whose evidence-linked contribution to inspect |
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+| `--node <node_id>` | return the source-scoped working set for one node |
+
+**Output**
+
+- default: source metadata; introduced vs evidencedExisting claims and relationships with status totals and lexicographic ids capped at 20; affected nodes ordered by (depth DESC, sortOrder, nodeId); scoped coverage totals; complete candidate claim ids in lexicographic order
+- the default is summaries and stable ids only — never claim or relationship bodies, quotes, provenance, or candidate bodies
+- --node: node { id, title, bodyMd, bodyHash }; source-contributed subtree claims ordered by claimId with status and candidates; lexicographic node-context allowedCitationIds; children with ownClaimCount ordered by (sortOrder, nodeId)
+- a valid node outside this source’s affected owner/ancestor set still returns successfully with one SOURCE_NO_CLAIMS info issue scoped to that node subtree
+
+**Examples**
+
+```bash
+# Summarize one source contribution
+kb source impact src_1a2b3c --json
+
+# Read one affected node’s source-scoped working set
+kb source impact src_1a2b3c --node nod_1a2b3c --json
+```
+
+*Related:* `kb coverage` · `kb relationship list` · `kb claim candidates` · `kb node show`
 
 #### `kb source list`
 
@@ -344,7 +385,7 @@ kb source list --json
 kb source list --status active --json
 ```
 
-*Related:* `kb source show` · `kb source chunks`
+*Related:* `kb source show` · `kb source chunks` · `kb coverage`
 
 #### `kb source show`
 
@@ -527,7 +568,7 @@ kb node show nod_1a2b3c --json
 kb node show nod_1a2b3c --context --json
 ```
 
-*Related:* `kb node tree` · `kb synthesize` · `kb provenance`
+*Related:* `kb node tree` · `kb synthesize` · `kb provenance` · `kb source impact`
 
 #### `kb node tree`
 
@@ -621,7 +662,40 @@ kb claim apply [options]
 kb claim apply --file ./claims.json --json
 ```
 
-*Related:* `kb source chunks` · `kb node show`
+*Related:* `kb source chunks` · `kb node show` · `kb claim candidates`
+
+#### `kb claim candidates`
+
+List lexical conflict-review candidates for active claims contributed by a source. Candidates are retrieval aids, never contradiction judgments.
+
+```text
+kb claim candidates --source <source_id>
+```
+
+*When:* Review lexical retrieval aids before finishing source ingestion; adjudicate with supersede, conflict, or an explicit coexistence judgment.
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+| `--source <source_id>` | source whose active contributed claims should be checked |
+
+**Output**
+
+- sourceId and active contributed claims ordered by claim id
+- each claim carries {claimId, nodeId, text, candidates:{matched, shown, complete, items}}
+- totals {claimsChecked, claimsWithCandidates}
+- instruction is present only when one or more claims have candidates
+
+**Examples**
+
+```bash
+# Review candidates for one source contribution
+kb claim candidates --source src_1a2b3c --json
+```
+
+*Related:* `kb claim apply` · `kb claim supersede` · `kb claim conflict` · `kb coverage` · `kb source impact`
 
 #### `kb claim conflict`
 
@@ -662,17 +736,17 @@ kb claim conflict <claim_id...>
 kb claim conflict clm_1a2b3c clm_4d5e6f --json
 ```
 
-*Related:* `kb claim supersede` · `kb node show`
+*Related:* `kb claim supersede` · `kb node show` · `kb claim candidates`
 
 #### `kb claim supersede`
 
-Mark an older claim superseded by another claim and stale affected nodes.
+Mark an older claim superseded by an existing active, span-backed claim and stale affected nodes.
 
 ```text
 kb claim supersede [options] <old_claim_id>
 ```
 
-*When:* Retire an outdated claim in favor of a newer one.
+*When:* Retire an outdated claim in favor of an existing active, span-backed claim without self-supersession or cycles. Works across subtrees.
 
 | Argument | Description |
 |---|---|
@@ -683,7 +757,7 @@ kb claim supersede [options] <old_claim_id>
 | `--json` | emit the result as a JSON envelope |
 | `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
 | `--help` | show this command’s help as an envelope (router-owned) |
-| `--by <new_claim_id>` | the superseding claim id |
+| `--by <new_claim_id>` | an existing active claim with at least one live span; must differ from the old claim and not create a cycle |
 
 **Output**
 
@@ -701,11 +775,11 @@ kb claim supersede [options] <old_claim_id>
 **Examples**
 
 ```bash
-# Supersede a claim
+# Resolve an outdated claim, including across subtrees
 kb claim supersede clm_1a2b3c --by clm_4d5e6f --json
 ```
 
-*Related:* `kb claim conflict` · `kb provenance`
+*Related:* `kb claim conflict` · `kb provenance` · `kb claim candidates`
 
 #### `kb entity list`
 
@@ -739,7 +813,7 @@ kb entity list --json
 kb entity list --type DataStore --json
 ```
 
-*Related:* `kb entity show` · `kb graph apply` · `kb search`
+*Related:* `kb entity show` · `kb graph apply` · `kb relationship list` · `kb search`
 
 #### `kb entity show`
 
@@ -773,7 +847,7 @@ kb entity show <entity_id>
 kb entity show ent_1a2b3c --json
 ```
 
-*Related:* `kb graph apply` · `kb search`
+*Related:* `kb graph apply` · `kb relationship list` · `kb search`
 
 #### `kb graph apply`
 
@@ -849,7 +923,81 @@ kb graph apply [options]
 kb graph apply --file ./graph.json --json
 ```
 
-*Related:* `kb entity show` · `kb source chunks`
+*Related:* `kb entity show` · `kb relationship list` · `kb source chunks` · `kb vocabulary list`
+
+#### `kb relationship list`
+
+List graph relationships with resolved entities and complete evidence. --source matches any live evidence span contributed by that source, not the source that first created the claim
+
+```text
+kb relationship list [options]
+```
+
+*When:* Inspect graph contributions after graph apply.
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+| `--source <source_id>` | filter by any live evidence contributed by a source |
+| `--entity <entity_id>` | filter by subject or object entity |
+| `--type <type>` | filter by exact relationship type |
+| `--status <status>` | filter by relationship status (one of: `active`, `superseded`, `conflicted`, `retracted`) |
+
+**Output**
+
+- RelationshipListSchema
+- filter: the supplied sourceId, entityId, type, and status filters
+- relationships: [{ id, type, status, description, confidence, firstSeenSource, subject, object, evidence }] ordered by (type, subject canonicalName, object canonicalName, id)
+- evidence is ordered by (sourceId, charStart, spanId)
+- totals: { relationships, evidenceLinks, matchingEvidenceLinks?, byStatus, byType }
+
+**Examples**
+
+```bash
+# Select relationships first created from source A after source B added evidence
+kb relationship list --source src_B --json
+```
+
+*Related:* `kb entity show` · `kb entity list` · `kb graph apply` · `kb coverage` · `kb source chunks` · `kb source impact`
+
+#### `kb vocabulary list`
+
+List recommended and observed claim, span, entity, and relationship vocabularies.
+
+```text
+kb vocabulary list [options]
+```
+
+*When:* Discover established vocabulary before authoring a graph payload.
+
+| Flag | Description |
+|---|---|
+| `--json` | emit the result as a JSON envelope |
+| `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
+| `--help` | show this command’s help as an envelope (router-owned) |
+| `--kind <claim\|span-role\|entity\|relationship>` | return only claim, span-role, entity, or relationship vocabulary |
+
+**Output**
+
+- claimTypes: the schema claim-type enum
+- spanRoles: supports, contradicts, context, supersedes
+- entityTypes: { recommended, observed: [{ type, count, recommended }] }
+- relationshipTypes: { recommended, observed: [{ type, count, recommended }] }
+- observed types are ordered by (count DESC, type)
+
+**Examples**
+
+```bash
+# List every vocabulary section
+kb vocabulary list --json
+
+# List only relationship vocabulary
+kb vocabulary list --kind relationship --json
+```
+
+*Related:* `kb graph apply` · `kb entity list` · `kb relationship list`
 
 ### synthesize — Write node prose that cites claims
 
@@ -873,9 +1021,14 @@ kb synthesize [options]
 
 **Input**
 
+```text
+expected_body_hash must be the bodyHash returned by kb node show <node_id> --context --json.
+```
+
 ```json
 {
   "node_id": "nod_1a2b3c",
+  "expected_body_hash": "8f50d2d8f6f3...",
   "title": "Caching strategy",
   "body_md": "The service caches responses for 60s [^clm_1a2b3c]."
 }
@@ -883,8 +1036,10 @@ kb synthesize [options]
 
 **Output**
 
-- single payload: nodeId, outcome (updated | unchanged | stale-cleared)
-- batch payload: nodes[] (inputIndex, nodeId, depth, outcome) in apply order + totals
+- single payload: nodeId, outcome (updated | unchanged | stale-cleared), bodyDelta
+- batch payload: nodes[] (inputIndex, nodeId, depth, outcome, bodyDelta) in apply order + totals
+- bodyDelta: charsBefore, charsAfter, citationsAdded, citationsRemoved, removedCurrent
+- CITATIONS_REMOVED warning: diagnostic ids for removed current-claim citations; it does not make the command fail
 - staleNodes (nodes still needing synthesis, deepest-first)
 
 **Side effects**
@@ -1030,7 +1185,7 @@ kb provenance <claim_id>
 kb provenance clm_1a2b3c --json
 ```
 
-*Related:* `kb node show` · `kb source show`
+*Related:* `kb node show` · `kb source show` · `kb claim supersede`
 
 #### `kb search`
 
@@ -1080,33 +1235,38 @@ kb search caching --scope claims --json
 
 #### `kb coverage`
 
-Report synthesis completeness gaps across sources, chunks, claims, and nodes.
+Report synthesis completeness gaps across sources, chunks, claims, and nodes. --source matches any live evidence span contributed by that source, not the source that first created the claim.
 
 ```text
-kb coverage
+kb coverage [--source <source_id>]
 ```
 
-*When:* Survey synthesis completeness after verify; descriptive, never an integrity gate.
+*When:* Survey synthesis completeness after verify; descriptive, never an integrity gate. NODE_SINGLE_SOURCE is corpus-only because a new-topic source legitimately creates single-source nodes. Valid empty scoped results are success; unknown sources are structured errors.
 
 | Flag | Description |
 |---|---|
 | `--json` | emit the result as a JSON envelope |
 | `--kb <dir>` | knowledge base directory (overrides KB_DIR and walk-up) |
 | `--help` | show this command’s help as an envelope (router-owned) |
+| `--source <source_id>` | scope coverage to contributions evidenced by one source |
 
 **Output**
 
-- summary: per-check { total, shown } for SOURCE_NO_CLAIMS, CHUNK_UNCITED, CLAIM_NOT_SYNTHESIZED, NODE_SINGLE_SOURCE, OPEN_QUESTION_NOT_SYNTHESIZED
-- issues: one aggregated info issue per non-empty check (ids capped at 20; exact totals in summary)
+- corpus data: summary per check plus structuralChunks { total, shown, ids } inventory
+- scoped data (CoverageSourceReportSchema): scope, chunks, claims by status, relationships by status, candidate review inventory with exact total and capped claim ids only, and four source-applicable findings with zeros present
+- issues: one aggregated info issue per non-empty actionable check (ids capped at 20; exact totals in data)
 
 **Examples**
 
 ```bash
-# Report coverage
+# Report corpus coverage
 kb coverage --json
+
+# Scope to a source that added evidence to existing claims
+kb coverage --source src_1a2b3c --json
 ```
 
-*Related:* `kb verify` · `kb render`
+*Related:* `kb verify` · `kb render` · `kb source list` · `kb relationship list` · `kb claim candidates` · `kb source impact`
 
 #### `kb propagate`
 
@@ -1311,14 +1471,17 @@ numbers from names — `React 18` and `React` are different entities.
 ```jsonc
 {
   "node_id": "nod_…",
+  "expected_body_hash": "8f50d2d8f6f3…",
   "title": "Storage",                       // optional
   "summary": "Redis holds bucket state.",   // optional (shown in parent subtopic lists)
   "body_md": "Bucket state is stored in Redis.[^clm_37c84b…] A Lua script keeps the check-and-decrement atomic.[^clm_adc85f…]"
 }
 ```
-Put an inline `[^clm_…]` citation after each assertion. Get claim ids from `kb node show
-<node_id>`. The renderer turns them into footnotes — **never write footnote definitions
-yourself**. A leaf must cite ≥1 claim; a parent may cite any claim in its subtree.
+Before authoring the payload, run `kb node show <node_id> --context --json` and copy the
+returned `bodyHash` into `expected_body_hash`. Put an inline `[^clm_…]` citation after
+each assertion, using claim ids from the same context read. The renderer turns them into
+footnotes — **never write footnote definitions yourself**. A leaf must cite ≥1 claim; a
+parent may cite any claim in its subtree.
 
 ### `answer-check`
 ```jsonc

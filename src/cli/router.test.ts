@@ -63,10 +63,14 @@ describe('pre-parse router', () => {
     expect(r.stderr).toBe('');
   });
 
-  it('exposes exactly 25 leaf commands (the current registry)', () => {
+  it('exposes exactly 29 leaf commands (the current registry)', () => {
     // 21 migrated commands + `source list` (Phase 0) + `node apply` (Phase 2)
-    // + `coverage` (Phase 4) + `entity list` (eval run 1, finding 3).
-    expect(COMMAND_NAMES).toHaveLength(25);
+    // + `coverage` (Phase 4) + `entity list` (eval run 1, finding 3)
+    // + `relationship list` (source-scoped QA Phase A4)
+    // + `claim candidates` (candidate review Phase B)
+    // + `source impact` (source-impact hub Phase C)
+    // + `vocabulary list` (vocabulary discovery Phase E).
+    expect(COMMAND_NAMES).toHaveLength(29);
   });
 
   it.each(COMMAND_NAMES)('`kb %s --help --json` (required inputs omitted) → HelpSpec envelope, exit 0', async (path) => {

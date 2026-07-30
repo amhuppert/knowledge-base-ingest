@@ -34,7 +34,7 @@ export function registerEntity(group: Command, ctx: RunContext): void {
       atomic: false,
       supportsDryRun: false,
       workflow: 'Survey the knowledge graph after graph apply, then inspect one entity.',
-      related: ['entity show', 'graph apply', 'search'],
+      related: ['entity show', 'graph apply', 'relationship list', 'search'],
       examples: [
         { description: 'List every entity', command: 'kb entity list --json' },
         { description: 'List only data stores', command: 'kb entity list --type DataStore --json' },
@@ -83,7 +83,7 @@ export function registerEntity(group: Command, ctx: RunContext): void {
     atomic: false,
     supportsDryRun: false,
     workflow: 'Inspect the knowledge graph after graph apply.',
-    related: ['graph apply', 'search'],
+    related: ['graph apply', 'relationship list', 'search'],
     examples: [{ description: 'Show one entity', command: 'kb entity show ent_1a2b3c --json' }],
   }).action(
     workspaceAction(ctx, (ws, { args }) => {

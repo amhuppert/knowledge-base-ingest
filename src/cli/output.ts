@@ -41,6 +41,8 @@ export interface Envelope<T> {
   /** Derived: warning-severity issue messages. */
   warnings: string[];
   nextActions: NextAction[];
+  /** Binding workflow guidance, emitted only by commands that own such a gate. */
+  instruction?: string;
   /** Guidance strings; placeholder-bearing command templates live here, not in nextActions. */
   hints: string[];
 }
@@ -48,6 +50,7 @@ export interface Envelope<T> {
 /** Steering that either constructor may attach. */
 export interface EnvelopeExtras {
   nextActions?: NextAction[];
+  instruction?: string;
   hints?: string[];
 }
 
@@ -76,6 +79,9 @@ function assemble<T>(okFlag: boolean, data: T | null, issues: Issue[], extras: E
     errors,
     warnings,
     nextActions: extras.nextActions ?? [],
+    ...(extras.instruction === undefined
+      ? {}
+      : { instruction: extras.instruction }),
     hints: extras.hints ?? [],
   };
 }
@@ -139,6 +145,9 @@ export function emit(
   if (env.nextActions.length > 0) {
     out.stdout('next:\n');
     for (const na of env.nextActions) out.stdout(`  ${na.title}\n    ${na.command}\n`);
+  }
+  if (env.instruction !== undefined) {
+    out.stdout(`instruction: ${env.instruction}\n`);
   }
   for (const hint of env.hints) out.stdout(`tip: ${hint}\n`);
 }

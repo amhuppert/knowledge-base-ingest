@@ -293,7 +293,7 @@ export function registerQuery(program: Command, ctx: RunContext): void {
       atomic: false,
       supportsDryRun: false,
       workflow: 'Trace a claim back to its exact source quotes.',
-      related: ['node show', 'source show'],
+      related: ['node show', 'source show', 'claim supersede'],
       examples: [{ description: 'Show a claim’s provenance', command: 'kb provenance clm_1a2b3c --json' }],
     },
   ).action(

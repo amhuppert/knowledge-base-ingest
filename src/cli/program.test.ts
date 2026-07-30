@@ -32,12 +32,16 @@ describe('program tree configuration', () => {
   const { program } = buildProgram(NULL_IO, false);
   const nodes = allNodes(program);
 
-  it('registers exactly 25 leaf commands and the 5 groups', () => {
+  it('registers exactly 29 leaf commands and the 7 groups', () => {
     // 21 migrated commands + `source list` (Phase 0) + `node apply` (Phase 2)
-    // + `coverage` (Phase 4) + `entity list` (eval run 1, finding 3).
-    expect(collectLeafPaths(program)).toHaveLength(25);
+    // + `coverage` (Phase 4) + `entity list` (eval run 1, finding 3)
+    // + `relationship list` (source-scoped QA Phase A4)
+    // + `claim candidates` (candidate review Phase B)
+    // + `source impact` (source-impact hub Phase C)
+    // + `vocabulary list` (vocabulary discovery Phase E).
+    expect(collectLeafPaths(program)).toHaveLength(29);
     const groups = program.commands.filter(isGroup).map((c) => c.name()).sort();
-    expect(groups).toEqual(['claim', 'entity', 'graph', 'node', 'source']);
+    expect(groups).toEqual(['claim', 'entity', 'graph', 'node', 'relationship', 'source', 'vocabulary']);
   });
 
   it('every node has exitOverride set (a callback function)', () => {
@@ -86,7 +90,7 @@ describe('program tree configuration', () => {
       .map((n) => commandPath(n))
       .sort();
     // The full §6.2 dry-run surface (node apply joined in Phase 2). "dry-run everywhere"
-    // is banned; the root and all five groups must NOT carry --dry-run.
+    // is banned; the root and all six groups must NOT carry --dry-run.
     expect(withDryRun).toEqual(['claim apply', 'graph apply', 'ingest', 'node apply', 'synthesize']);
     expect(program.options.some((o) => o.long === '--dry-run'), 'root has no --dry-run').toBe(false);
     for (const group of program.commands.filter(isGroup)) {

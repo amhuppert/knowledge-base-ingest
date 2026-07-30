@@ -81,6 +81,7 @@ function seedConsistentKb(): { ctx: ServiceContext; repos: Repositories; sourceI
   const claim = repos.claims.listByNode(leaf.id)[0]!;
   new NodeService(ctx).synthesize({
     node_id: leaf.id,
+    expected_body_hash: '',
     body_md: `Refresh tokens rotate on every use.[^${claim.id}]`,
   });
   return { ctx, repos, sourceId, claimId: claim.id, leafId: leaf.id };

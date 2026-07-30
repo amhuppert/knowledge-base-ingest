@@ -173,6 +173,7 @@ interface ConflictedRow {
   claim_type: string;
   status: string;
   text: string;
+  superseded_by_claim_id: string | null;
 }
 
 /** kb/open-questions.md — unresolved questions and conflicted claims. */
@@ -181,7 +182,7 @@ function renderOpenQuestions(repos: Repositories): RenderedFile {
   // order by (created_at, id) mirrors the other claim queries.
   const rows = repos.db
     .prepare(
-      `SELECT id, node_id, claim_type, status, text FROM claims
+      `SELECT id, node_id, claim_type, status, text, superseded_by_claim_id FROM claims
        WHERE status = 'conflicted' OR claim_type = 'open_question'
        ORDER BY created_at, id`,
     )
@@ -203,10 +204,30 @@ function renderOpenQuestions(repos: Repositories): RenderedFile {
       const node = repos.nodes.getById(row.node_id as NodeId);
       if (node) lines.push(`  - Node: ${node.title}`);
     }
-    for (const span of repos.claimSpans.spansForClaim(claimId)) {
-      const source = repos.sources.getById(span.sourceId);
-      const where = source ? ` (${source.title}, ${source.storedPath})` : '';
-      lines.push(`  - “${span.quote}”${where}`);
+    const appendQuotes = (id: ReturnType<typeof makeClaimId>): void => {
+      for (const span of repos.claimSpans.spansForClaim(id)) {
+        const source = repos.sources.getById(span.sourceId);
+        const where = source ? ` (${source.title}, ${source.storedPath})` : '';
+        lines.push(`  - “${span.quote}”${where}`);
+      }
+    };
+    appendQuotes(claimId);
+
+    if (
+      row.claim_type === 'open_question' &&
+      row.status === 'superseded' &&
+      row.superseded_by_claim_id !== null
+    ) {
+      const resolverId = makeClaimId(row.superseded_by_claim_id);
+      const resolver = repos.claims.getById(resolverId);
+      if (resolver) {
+        lines.push(`  - Resolved by: "${resolver.text}" [${resolver.id}]`);
+        if (resolver.nodeId !== null) {
+          const resolverNode = repos.nodes.getById(resolver.nodeId);
+          if (resolverNode) lines.push(`  - Resolution node: ${resolverNode.title}`);
+        }
+        appendQuotes(resolverId);
+      }
     }
   }
 

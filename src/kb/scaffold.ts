@@ -44,7 +44,7 @@ kb search "term" --scope claims --json
 kb node create --parent <root|node_id> --title "T" --kind <root|topic|leaf> --json
 kb claim apply --file claims.json --json  # see kb-ingest skill for the JSON shape
 kb graph apply --file graph.json --json
-kb synthesize --file node.json --json     # { node_id, body_md, title?, summary? }
+kb synthesize --file node.json --json     # include expected_body_hash from node show --context
 kb verify --strict --json
 kb render --json                          # regenerate kb/*.md (use --check to detect drift)
 \`\`\`

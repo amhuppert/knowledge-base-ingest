@@ -1,5 +1,5 @@
 {
   "nodes": [
-    { "node_id": "nod_474ea1fbe2191831", "body_md": "RateGuard is an API rate-limiting service. This knowledge base covers its architecture, API surface, operations, and key decisions." }
+    { "node_id": "nod_474ea1fbe2191831", "expected_body_hash": "", "body_md": "RateGuard is an API rate-limiting service. This knowledge base covers its architecture, API surface, operations, and key decisions." }
   ]
 }

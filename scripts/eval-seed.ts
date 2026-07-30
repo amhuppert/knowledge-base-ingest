@@ -294,7 +294,7 @@ function resynthesize(root: string, superseded: string[], memoClaimIds: Map<stri
     if (stale.length === 0) return;
     for (const node of stale) {
       const ctx = kb('node show --context', ['node', 'show', node.id, '--context', '--json'], { kbDir: root }) as {
-        node: { bodyMd: string };
+        node: { bodyMd: string; bodyHash: string };
         claims: ShownClaim[];
       };
       const template = BODY_TEMPLATES[node.title];
@@ -308,7 +308,11 @@ function resynthesize(root: string, superseded: string[], memoClaimIds: Map<stri
       if (!template) for (const id of superseded) bodyMd = bodyMd.split(`[^${id}]`).join('');
       kb('synthesize', ['synthesize', '--file', '-', '--json'], {
         kbDir: root,
-        input: JSON.stringify({ node_id: node.id, body_md: bodyMd }),
+        input: JSON.stringify({
+          node_id: node.id,
+          expected_body_hash: ctx.node.bodyHash,
+          body_md: bodyMd,
+        }),
       });
     }
   }

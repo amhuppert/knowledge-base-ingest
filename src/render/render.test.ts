@@ -87,6 +87,7 @@ function seed(): { ctx: ServiceContext; repos: Repositories; sourceId: SourceId;
   // Synthesize the leaf body with an inline citation to that claim.
   new NodeService(ctx).synthesize({
     node_id: leaf.id,
+    expected_body_hash: '',
     body_md: `Refresh tokens rotate on every use.[^${claim.id}]`,
     summary: 'How refresh tokens rotate.',
   });
@@ -199,6 +200,64 @@ describe('renderAll', () => {
     expect(oq.body).toContain('Should sessions stay in PostgreSQL?');
     expect(oq.body).toContain('Node: Token Rotation');
     expect(oq.body).toContain('“Sessions are stored in PostgreSQL”');
+  });
+
+  it('renders a superseded open question with the resolving claim and both sides of provenance deterministically', () => {
+    const { ctx, repos, sourceId, leafId } = seed();
+    const chunk = chunkContaining(repos, sourceId, 'PostgreSQL');
+    const questionQuote = 'Sessions are stored in PostgreSQL';
+    const questionReceipt = new ClaimService(ctx).apply({
+      source_id: sourceId,
+      claims: [
+        {
+          node_id: leafId,
+          text: 'Should sessions stay in PostgreSQL?',
+          claim_type: 'open_question',
+          confidence: 0.7,
+          spans: [{ chunk_id: chunk.id, quote: questionQuote, role: 'supports', confidence: 0.7 }],
+        },
+      ],
+    });
+    const resolutionNode = new NodeService(ctx).createNode({
+      parentId: repos.nodes.getById(leafId)!.parentId,
+      title: 'Storage Decision',
+      kind: 'leaf',
+    }).node;
+    const resolverQuote = 'Sessions are stored in PostgreSQL';
+    const resolverReceipt = new ClaimService(ctx).apply({
+      source_id: sourceId,
+      claims: [
+        {
+          node_id: resolutionNode.id,
+          text: 'Sessions will remain in PostgreSQL.',
+          claim_type: 'fact',
+          confidence: 0.95,
+          spans: [{ chunk_id: chunk.id, quote: resolverQuote, role: 'supports', confidence: 0.95 }],
+        },
+      ],
+    });
+    const questionId = questionReceipt.claims[0]!.claimId;
+    const resolverId = resolverReceipt.claims[0]!.claimId;
+    new ClaimService(ctx).supersede(questionId, resolverId);
+
+    const first = renderAll(repos);
+    const second = renderAll(repos);
+    expect(second.map((file) => file.body)).toEqual(first.map((file) => file.body));
+
+    const source = repos.sources.getById(sourceId)!;
+    const oq = first.find((file) => file.path === 'kb/open-questions.md')!;
+    expect(oq.body).toContain(
+      [
+        '- Should sessions stay in PostgreSQL?',
+        '  - Type: open_question',
+        '  - Status: superseded',
+        '  - Node: Token Rotation',
+        `  - “${questionQuote}” (${source.title}, ${source.storedPath})`,
+        `  - Resolved by: "Sessions will remain in PostgreSQL." [${resolverId}]`,
+        '  - Resolution node: Storage Decision',
+        `  - “${resolverQuote}” (${source.title}, ${source.storedPath})`,
+      ].join('\n'),
+    );
   });
 
   it('renders conflicted claims in open-questions.md', () => {

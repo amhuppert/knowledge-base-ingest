@@ -93,12 +93,26 @@ beforeEach(async () => {
 afterEach(() => rmSync(kb, { recursive: true, force: true }));
 
 describe('kb synthesize --file — payload shape (04 §3)', () => {
+  it.each([
+    { name: 'apply', dryRun: false },
+    { name: 'dry-run', dryRun: true },
+  ])('requires expected_body_hash on every batch entry in $name', async ({ dryRun }) => {
+    const rootId = await createNode('Root', 'root');
+    const file = writePayload({ nodes: [{ node_id: rootId, body_md: 'Overview.' }] });
+    const r = await runIo(['synthesize', '--file', file, ...(dryRun ? ['--dry-run'] : [])]);
+
+    expect(r.code).toBe(1);
+    expect(r.json.issues).toEqual([
+      expect.objectContaining({ code: 'PAYLOAD_SCHEMA', path: 'nodes[0].expected_body_hash' }),
+    ]);
+  });
+
   it('still accepts the single object unchanged (receipt shape preserved)', async () => {
     const rootId = await createNode('Root', 'root');
     const leafId = await createNode('Caching', 'leaf', rootId);
     const claimId = await applyClaim(leafId, 'The widget service caches in Redis.', 'caches results in Redis');
 
-    const file = writePayload({ node_id: leafId, body_md: `Caches in Redis.[^${claimId}]` });
+    const file = writePayload({ node_id: leafId, expected_body_hash: '', body_md: `Caches in Redis.[^${claimId}]` });
     const r = await runIo(['synthesize', '--file', file]);
 
     expect(r.code).toBe(0);
@@ -112,6 +126,7 @@ describe('kb synthesize --file — payload shape (04 §3)', () => {
     const oversized = {
       nodes: Array.from({ length: 201 }, (_, i) => ({
         node_id: `nod_${String(i).padStart(16, '0')}`,
+        expected_body_hash: '',
         body_md: 'Filler.',
       })),
     };
@@ -132,9 +147,9 @@ describe('kb synthesize --file — payload shape (04 §3)', () => {
 
     const payload = {
       nodes: [
-        { node_id: leafId, body_md: `First.[^${claimId}]` },
-        { node_id: rootId, body_md: `Root.[^${claimId}]` },
-        { node_id: leafId, body_md: `Second.[^${claimId}]` },
+        { node_id: leafId, expected_body_hash: '', body_md: `First.[^${claimId}]` },
+        { node_id: rootId, expected_body_hash: '', body_md: `Root.[^${claimId}]` },
+        { node_id: leafId, expected_body_hash: '', body_md: `Second.[^${claimId}]` },
       ],
     };
     const r = await runIo(['synthesize', '--file', writePayload(payload)]);
@@ -159,18 +174,54 @@ describe('kb synthesize --file {"nodes":[…]} — apply (04 §3)', () => {
     // Submitted shallowest-first — the receipt must come back deepest-first.
     const payload = {
       nodes: [
-        { node_id: rootId, body_md: `Root prose.[^${claimId}]` },
-        { node_id: topicId, body_md: `Topic prose.[^${claimId}]` },
-        { node_id: leafId, body_md: `Leaf prose.[^${claimId}]` },
+        { node_id: rootId, expected_body_hash: '', body_md: `Root prose.[^${claimId}]` },
+        { node_id: topicId, expected_body_hash: '', body_md: `Topic prose.[^${claimId}]` },
+        { node_id: leafId, expected_body_hash: '', body_md: `Leaf prose.[^${claimId}]` },
       ],
     };
     const r = await runIo(['synthesize', '--file', writePayload(payload)]);
 
     expect(r.code).toBe(0);
     expect(r.json.data!['nodes']).toEqual([
-      { inputIndex: 2, nodeId: leafId, depth: 2, outcome: 'updated' },
-      { inputIndex: 1, nodeId: topicId, depth: 1, outcome: 'updated' },
-      { inputIndex: 0, nodeId: rootId, depth: 0, outcome: 'updated' },
+      {
+        inputIndex: 2,
+        nodeId: leafId,
+        depth: 2,
+        outcome: 'updated',
+        bodyDelta: {
+          charsBefore: 0,
+          charsAfter: `Leaf prose.[^${claimId}]`.length,
+          citationsAdded: [claimId],
+          citationsRemoved: [],
+          removedCurrent: [],
+        },
+      },
+      {
+        inputIndex: 1,
+        nodeId: topicId,
+        depth: 1,
+        outcome: 'updated',
+        bodyDelta: {
+          charsBefore: 0,
+          charsAfter: `Topic prose.[^${claimId}]`.length,
+          citationsAdded: [claimId],
+          citationsRemoved: [],
+          removedCurrent: [],
+        },
+      },
+      {
+        inputIndex: 0,
+        nodeId: rootId,
+        depth: 0,
+        outcome: 'updated',
+        bodyDelta: {
+          charsBefore: 0,
+          charsAfter: `Root prose.[^${claimId}]`.length,
+          citationsAdded: [claimId],
+          citationsRemoved: [],
+          removedCurrent: [],
+        },
+      },
     ]);
     expect(r.json.data!['totals']).toEqual({ updated: 3, unchanged: 0, staleCleared: 0 });
     expect(await bodyOf(leafId)).toBe(`Leaf prose.[^${claimId}]`);
@@ -183,8 +234,8 @@ describe('kb synthesize --file {"nodes":[…]} — apply (04 §3)', () => {
 
     const payload = {
       nodes: [
-        { node_id: leafId, body_md: `Good.[^${claimId}]` },
-        { node_id: rootId, body_md: 'Bad.[^clm_deadbeefdeadbeef]' },
+        { node_id: leafId, expected_body_hash: '', body_md: `Good.[^${claimId}]` },
+        { node_id: rootId, expected_body_hash: '', body_md: 'Bad.[^clm_deadbeefdeadbeef]' },
       ],
     };
     const r = await runIo(['synthesize', '--file', writePayload(payload)]);
@@ -205,8 +256,8 @@ describe('kb synthesize --file {"nodes":[…]} — apply (04 §3)', () => {
 
     const payload = {
       nodes: [
-        { node_id: rootId, body_md: `Root prose.[^${claimId}]` },
-        { node_id: leafId, body_md: `Leaf prose.[^${claimId}]` },
+        { node_id: rootId, expected_body_hash: '', body_md: `Root prose.[^${claimId}]` },
+        { node_id: leafId, expected_body_hash: '', body_md: `Leaf prose.[^${claimId}]` },
       ],
     };
     const r = await runIo(['synthesize', '--file', writePayload(payload)]);
@@ -223,8 +274,8 @@ describe('kb synthesize --file {"nodes":[…]} — apply (04 §3)', () => {
 
     const file = writePayload({
       nodes: [
-        { node_id: rootId, body_md: `Root prose.[^${claimId}]` },
-        { node_id: leafId, body_md: `Leaf prose.[^${claimId}]` },
+        { node_id: rootId, expected_body_hash: '', body_md: `Root prose.[^${claimId}]` },
+        { node_id: leafId, expected_body_hash: '', body_md: `Leaf prose.[^${claimId}]` },
       ],
     });
     const dry = await runIo(['synthesize', '--file', file, '--dry-run']);

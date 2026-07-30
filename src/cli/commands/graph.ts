@@ -9,6 +9,8 @@ import { leaf, readPayload, workspaceAction, type RunContext } from '../run.js';
 import { defineHelp } from '../help/spec.js';
 import { steeringFor } from '../steering.js';
 import { parseGraphApply } from '../../domain/schemas/agent.js';
+import { domainIssueToIssue } from '../issues.js';
+import type { DomainIssue } from '../../domain/issueCodes.js';
 
 export function registerGraph(group: Command, ctx: RunContext): void {
   defineHelp(
@@ -59,19 +61,28 @@ export function registerGraph(group: Command, ctx: RunContext): void {
       // (via `leaf(..., { dryRun: true })`), so the spec MUST declare it (01 §4/§6.2).
       supportsDryRun: true,
       workflow: 'Extract the knowledge graph from a source alongside its claims.',
-      related: ['entity show', 'source chunks'],
+      related: ['entity show', 'relationship list', 'source chunks', 'vocabulary list'],
       examples: [{ description: 'Apply a graph payload', command: 'kb graph apply --file ./graph.json --json' }],
     },
   ).action(
     workspaceAction(
       ctx,
       (ws, { opts }) => {
-        const receipt = ws.graph.apply(parseGraphApply(readPayload(opts)));
-        // Graph steering (01 §6.1): hint at the first entity for inspection; NEVER a
-        // stale chain (graph mutations never stale nodes).
-        const firstEntityId = receipt.entities[0]?.entityId;
-        const steering = steeringFor('graph apply', firstEntityId ? { ok: true, firstEntityId } : { ok: true }, ctx.registry);
-        return success(receipt, { nextActions: steering.nextActions, hints: steering.hints });
+        const payload = parseGraphApply(readPayload(opts));
+        let diagnostics: readonly DomainIssue[] = [];
+        const receipt = ws.graph.apply(payload, {
+          onDiagnostics: (issues) => {
+            diagnostics = issues;
+          },
+        });
+        // Review the exact contribution from the payload source; graph mutations never
+        // produce a stale-node chain.
+        const steering = steeringFor('graph apply', { ok: true, sourceId: payload.source_id }, ctx.registry);
+        return success(receipt, {
+          issues: diagnostics.map(domainIssueToIssue),
+          nextActions: steering.nextActions,
+          hints: steering.hints,
+        });
       },
       { dryRunCommand: 'graph apply' },
     ),

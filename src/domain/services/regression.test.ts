@@ -136,7 +136,7 @@ describe('regression: creating a child marks the parent chain stale', () => {
     const { ctx, repos } = makeCtx();
     const root = new NodeService(ctx).createNode({ parentId: null, title: 'Root', kind: 'root' }).node;
     // Make the root fresh (synthesize with an empty, citation-free body is allowed for a non-leaf).
-    new NodeService(ctx).synthesize({ node_id: root.id, body_md: 'Overview.' });
+    new NodeService(ctx).synthesize({ node_id: root.id, expected_body_hash: '', body_md: 'Overview.' });
     expect(repos.nodes.getById(root.id)?.isStale).toBe(false);
 
     new NodeService(ctx).createNode({ parentId: root.id as NodeId, title: 'Child', kind: 'leaf' });

@@ -8,7 +8,7 @@ import { runCli, type CliIo } from './runCli.js';
  * Graph apply schema breaking-changes + steering (03 §3.2, criterion 5). Entity
  * `evidence` and relationship-evidence `confidence` are removed and rejected via
  * PAYLOAD_SCHEMA with a field-specific hint explaining the silent-loss elimination.
- * A successful apply hints at `kb entity show <firstEntityId> --json` with no stale chain.
+ * A successful apply hints at the source-scoped relationship review with no stale chain.
  */
 
 interface CliResult {
@@ -16,7 +16,7 @@ interface CliResult {
   json: {
     ok: boolean;
     data: Record<string, unknown> | null;
-    issues: Array<{ code: string; message: string; hint?: string; path?: string }>;
+    issues: Array<{ code: string; severity: string; message: string; hint?: string; path?: string }>;
     nextActions: Array<{ title: string; command: string }>;
     hints: string[];
   };
@@ -51,6 +51,80 @@ beforeEach(async () => {
   chunkId = (chunks.json.data as { chunks: Array<{ id: string; text: string }> }).chunks.find((c) =>
     c.text.includes('validates the key'),
   )!.id;
+});
+
+describe('graph apply — type diagnostics (Phase E)', () => {
+  function relationshipPayload(type: string): unknown {
+    return {
+      source_id: sourceId,
+      entities: [
+        { type: 'Service', name: 'Gateway' },
+        { type: 'Service', name: 'Accounts' },
+      ],
+      relationships: [
+        {
+          type,
+          subject: { type: 'Service', name: 'Gateway' },
+          object: { type: 'Service', name: 'Accounts' },
+          evidence: [{ chunk_id: chunkId, quote: 'validates the key against the Accounts service' }],
+        },
+      ],
+    };
+  }
+
+  it('warns that depends-on is a near miss for depends_on instead of reporting it as new', async () => {
+    const file = writePayload(relationshipPayload('depends-on'));
+    const result = await runIo(['graph', 'apply', '--file', file, '--dry-run']);
+
+    expect(result.code).toBe(0);
+    expect(result.json.ok).toBe(true);
+    expect(result.json.issues).toEqual([
+      expect.objectContaining({
+        code: 'GRAPH_TYPE_NEAR_MISS',
+        severity: 'warning',
+        message: expect.stringMatching(/depends-on.*depends_on/i),
+      }),
+    ]);
+    expect(result.json.issues.some((issue) => issue.code === 'GRAPH_TYPE_NEW')).toBe(false);
+  });
+
+  it('reports a genuinely new type on dry-run and apply while still persisting it', async () => {
+    const file = writePayload(relationshipPayload('routes_through'));
+
+    const preview = await runIo(['graph', 'apply', '--file', file, '--dry-run']);
+    expect(preview.code).toBe(0);
+    expect(preview.json.ok).toBe(true);
+    expect(preview.json.issues).toEqual([
+      expect.objectContaining({
+        code: 'GRAPH_TYPE_NEW',
+        severity: 'info',
+        message: expect.stringMatching(/routes_through.*depends_on.*\d+/i),
+      }),
+    ]);
+
+    const applied = await runIo(['graph', 'apply', '--file', file]);
+    expect(applied.code).toBe(0);
+    expect(applied.json.ok).toBe(true);
+    expect(applied.json.issues).toEqual([
+      expect.objectContaining({ code: 'GRAPH_TYPE_NEW', severity: 'info' }),
+    ]);
+
+    const listed = await runIo(['relationship', 'list', '--type', 'routes_through']);
+    expect(listed.code).toBe(0);
+    expect(
+      (listed.json.data as { relationships: Array<{ type: string }> }).relationships.map(
+        (relationship) => relationship.type,
+      ),
+    ).toEqual(['routes_through']);
+  });
+
+  it('emits no type diagnostic for exact established entity and relationship types', async () => {
+    const file = writePayload(relationshipPayload('depends_on'));
+    const result = await runIo(['graph', 'apply', '--file', file, '--dry-run']);
+
+    expect(result.code).toBe(0);
+    expect(result.json.issues.some((issue) => issue.code.startsWith('GRAPH_TYPE_'))).toBe(false);
+  });
 });
 
 afterEach(() => rmSync(kb, { recursive: true, force: true }));
@@ -96,7 +170,7 @@ describe('graph apply — removed fields rejected via PAYLOAD_SCHEMA (03 §3.2)'
 });
 
 describe('graph apply — steering (03 §3.2)', () => {
-  it('a successful apply hints at kb entity show <firstEntityId> --json and never steers to node show', async () => {
+  it('a successful apply emits exactly the source-scoped relationship-list hint', async () => {
     const file = writePayload({
       source_id: sourceId,
       entities: [
@@ -114,8 +188,11 @@ describe('graph apply — steering (03 §3.2)', () => {
     });
     const res = await runIo(['graph', 'apply', '--file', file]);
     expect(res.code).toBe(0);
-    const firstEntityId = (res.json.data as { entities: Array<{ entityId: string }> }).entities[0]!.entityId;
-    expect(res.json.hints.join(' ')).toContain(`kb entity show ${firstEntityId} --json`);
+    expect(res.json.hints).toEqual([
+      `kb relationship list --source ${sourceId} --json`,
+    ]);
+    expect(res.json.hints.join(' ')).not.toContain('kb entity show');
+    expect(res.json.hints.join(' ')).not.toContain('kb entity list');
     // Graph never emits a stale chain (01 §6.1).
     expect(res.json.nextActions.some((n) => n.command.startsWith('kb node show'))).toBe(false);
   });

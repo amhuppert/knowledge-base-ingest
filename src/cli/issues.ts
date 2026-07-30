@@ -50,10 +50,16 @@ export const HINTS: Record<IssueCode, string> = {
   QUOTE_AMBIGUOUS: 'The quote appears more than once. Reread kb source chunks <source_id> --json and extend the quote with adjacent verbatim text until it is unique, then re-run.',
   CLAIM_HAS_PROVENANCE: 'Every active claim needs a supporting span. Re-run kb claim apply --json with a quote-verified span, or retract the claim.',
 
+  // --- Graph vocabulary diagnostics ---
+  GRAPH_TYPE_NEW: 'A deliberate new graph type is legal. Compare it with kb vocabulary list --json before applying.',
+  GRAPH_TYPE_NEAR_MISS: 'This graph type resembles an established spelling. Treat it as a payload typo and fix it before applying.',
+
   // --- Citations ---
   CITATION_UNKNOWN: 'The cited claim id does not exist. Cite an id shown by kb node show <node_id> --json.',
   CITATION_OUT_OF_SUBTREE: 'Cite only claims owned within the node’s subtree. Move the claim or cite the correct node; kb node show <node_id> --json lists what is in scope.',
   CITATION_INACTIVE: 'The cited claim is superseded or retracted. Cite the active replacement; kb provenance <claim_id> --json shows the lineage.',
+  BODY_HASH_MISMATCH: 'Re-read the node: kb node show <node_id> --context --json',
+  CITATIONS_REMOVED: 'The ids field lists current claims whose citations were removed from the node body.',
   PROVENANCE_SOURCE_INACTIVE:
     'The claim’s supporting quotes anchor only to non-active sources. Check the lineage with kb provenance <claim_id> --json; confirm the quote survives in the active successor, or re-extract the claim from it.',
 

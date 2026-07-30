@@ -153,6 +153,7 @@ describe('kb CLI golden parity (in-process)', () => {
     // synthesize the leaf, citing the claim, which clears the leaf's stale flag.
     cap.synthesize = await runPayload(['synthesize'], {
       node_id: runtime.leafId,
+      expected_body_hash: '',
       body_md: `The widget service caches results in Redis for speed.[^${runtime.claimId}]\n`,
     });
 
@@ -373,10 +374,12 @@ describe('kb CLI golden parity (in-process)', () => {
       errors: [],
     });
     // No stale chain: graph never stales nodes, so the receipt omits the field entirely
-    // and steering points at the first entity instead (01 §6.1, 03 §3.2).
+    // and steering points at the exact source-scoped relationship contribution.
     expect('staleNodes' in (cap.graphApply.env.data as object)).toBe(false);
     expect(cap.graphApply.env.nextActions).toEqual([]);
-    expect(cap.graphApply.env.hints).toContain(`kb entity show ${WIDGET_ENTITY_ID} --json`);
+    expect(cap.graphApply.env.hints).toEqual([
+      `kb relationship list --source ${SOURCE_ID} --json`,
+    ]);
   });
 
   it('claim apply — ambiguous-quote failure', () => {

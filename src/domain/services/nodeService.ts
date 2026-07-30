@@ -1,6 +1,6 @@
 import type { ServiceContext } from './context.js';
 import type { Node } from '../schemas/models.js';
-import type { NodeId } from '../ids.js';
+import { makeClaimId, type NodeId } from '../ids.js';
 import type { NodeKind } from '../schemas/enums.js';
 import type { NodeApply, Synthesize, SynthesizeBatch } from '../schemas/agent.js';
 import { sha256Hex } from '../algorithms/hash.js';
@@ -9,6 +9,7 @@ import { slugify } from '../algorithms/normalize.js';
 import { DomainIssueError, DomainIssuesError, formatPath, type DomainIssue } from '../issueCodes.js';
 import { prevalidateNodeManifest } from './nodeManifest.js';
 import { validateSynthesis } from './synthesisValidator.js';
+import { computeBodyDelta, type BodyDelta } from './bodyDelta.js';
 
 export interface CreateNodeInput {
   parentId: NodeId | null;
@@ -47,6 +48,7 @@ export type SynthesizeOutcome = 'updated' | 'unchanged' | 'stale-cleared';
 export interface SynthesizeReceipt {
   nodeId: NodeId;
   outcome: SynthesizeOutcome;
+  bodyDelta: BodyDelta;
   staleNodes: NodeId[];
   /** @deprecated superseded by `outcome`; true iff a write occurred (outcome ≠ 'unchanged'). */
   updated: boolean;
@@ -64,6 +66,7 @@ export interface SynthesizeNodeReceipt {
   /** The node's depth — the key the deepest-first ordering sorts on, echoed for visibility. */
   depth: number;
   outcome: SynthesizeOutcome;
+  bodyDelta: BodyDelta;
 }
 
 /**
@@ -230,14 +233,23 @@ export class NodeService {
     const node = this.requireNode(payload.node_id);
 
     const validation = validateSynthesis(repos, payload);
-    const errors = validation.issues.filter((i) => (i.severity ?? 'error') === 'error');
+    const mismatch = this.bodyHashMismatch(node, payload);
+    const errors = [...(mismatch ? [mismatch] : []), ...validation.issues].filter(
+      (i) => (i.severity ?? 'error') === 'error',
+    );
     if (errors.length > 0) throw new DomainIssuesError(errors);
 
     // True no-op: nothing to write and the node is already fresh.
-    if (this.isNoop(node, payload)) return this.synthReceipt(payload.node_id, 'unchanged');
+    if (this.isNoop(node, payload)) {
+      return this.synthReceipt(
+        payload.node_id,
+        'unchanged',
+        this.bodyDelta(node.bodyMd, payload.body_md),
+      );
+    }
 
-    const outcome = repos.tx(() => this.applySynthesize(payload, now));
-    return this.synthReceipt(payload.node_id, outcome);
+    const applied = repos.tx(() => this.applySynthesize(payload, now));
+    return this.synthReceipt(payload.node_id, applied.outcome, applied.bodyDelta);
   }
 
   /**
@@ -266,6 +278,8 @@ export class NodeService {
         });
         return;
       }
+      const mismatch = this.bodyHashMismatch(node, entry, ['nodes', inputIndex]);
+      if (mismatch) issues.push(mismatch);
       issues.push(...validateSynthesis(repos, entry, { pathPrefix: ['nodes', inputIndex] }).issues);
       entries.push({ inputIndex, entry, node });
     });
@@ -287,7 +301,7 @@ export class NodeService {
         inputIndex,
         nodeId: entry.node_id,
         depth: node.depth,
-        outcome: this.applySynthesize(entry, now),
+        ...this.applySynthesize(entry, now),
       })),
     );
 
@@ -322,18 +336,46 @@ export class NodeService {
     return this.contentSame(node, payload) && !node.isStale;
   }
 
+  private bodyHashMismatch(
+    node: Node,
+    payload: Synthesize,
+    pathPrefix: ReadonlyArray<string | number> = [],
+  ): DomainIssue | undefined {
+    if (payload.expected_body_hash === node.bodyHash) return undefined;
+    return {
+      code: 'BODY_HASH_MISMATCH',
+      message: `node ${node.id} body changed since it was read`,
+      path: formatPath([...pathPrefix, 'expected_body_hash']),
+      ids: [node.id],
+      hint: `Re-read the node: kb node show ${node.id} --context --json`,
+    };
+  }
+
+  private bodyDelta(oldBody: string, newBody: string): BodyDelta {
+    return computeBodyDelta(oldBody, newBody, (id) => {
+      const claim = this.ctx.repos.claims.getById(makeClaimId(id));
+      return claim?.status === 'active' || claim?.status === 'conflicted';
+    });
+  }
+
   /**
    * Apply ONE already-validated entry (node existence + citations checked by the caller)
    * and report its outcome. Must run inside a transaction whenever it can write. The node
    * is re-read here rather than reused from prevalidation so a batch entry sees the
    * staleness a deeper entry propagated moments earlier.
    */
-  private applySynthesize(payload: Synthesize, now: string): SynthesizeOutcome {
+  private applySynthesize(
+    payload: Synthesize,
+    now: string,
+  ): { outcome: SynthesizeOutcome; bodyDelta: BodyDelta } {
     const repos = this.ctx.repos;
     const node = this.requireNode(payload.node_id);
+    const mismatch = this.bodyHashMismatch(node, payload);
+    if (mismatch) throw new DomainIssuesError([mismatch]);
+    const bodyDelta = this.bodyDelta(node.bodyMd, payload.body_md);
     const contentSame = this.contentSame(node, payload);
 
-    if (contentSame && !node.isStale) return 'unchanged';
+    if (contentSame && !node.isStale) return { outcome: 'unchanged', bodyDelta };
 
     if (contentSame) {
       // Content identical but stale — re-affirm freshness as a timestamped state change.
@@ -344,7 +386,7 @@ export class NodeService {
         summary: `Cleared stale on node "${node.title}"`,
         detail: { nodeId: payload.node_id, unchanged: true },
       });
-      return 'stale-cleared';
+      return { outcome: 'stale-cleared', bodyDelta };
     }
 
     const titleChanged = payload.title !== undefined && payload.title !== node.title;
@@ -369,15 +411,16 @@ export class NodeService {
       summary: `Synthesized node "${payload.title ?? node.title}"`,
       detail: { nodeId: payload.node_id, unchanged: false },
     });
-    return 'updated';
+    return { outcome: 'updated', bodyDelta };
   }
 
   /** Assemble a synthesize receipt: authoritative `outcome`/`staleNodes` + deprecated aliases. */
-  private synthReceipt(nodeId: NodeId, outcome: SynthesizeOutcome): SynthesizeReceipt {
+  private synthReceipt(nodeId: NodeId, outcome: SynthesizeOutcome, bodyDelta: BodyDelta): SynthesizeReceipt {
     const staleNodes = this.ctx.repos.nodes.listStaleDeepestFirst().map((n) => n.id);
     return {
       nodeId,
       outcome,
+      bodyDelta,
       staleNodes,
       updated: outcome !== 'unchanged',
       unchanged: outcome === 'unchanged',

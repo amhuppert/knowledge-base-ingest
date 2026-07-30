@@ -294,11 +294,15 @@ describe('every registered issue code is exercised or explicitly reserved (01 §
     QUOTE_NOT_FOUND: 'cli/domain-errors.test.ts',
     QUOTE_AMBIGUOUS: 'cli/domain-errors.test.ts',
     CLAIM_HAS_PROVENANCE: 'cli/issue-coverage.test.ts',
+    GRAPH_TYPE_NEW: 'cli/graph-schema-steering.test.ts',
+    GRAPH_TYPE_NEAR_MISS: 'cli/graph-schema-steering.test.ts',
 
     // --- Citations ---
     CITATION_UNKNOWN: 'cli/domain-errors.test.ts',
     CITATION_OUT_OF_SUBTREE: 'cli/synthesize.test.ts',
     CITATION_INACTIVE: 'domain/services/synthesisValidator.test.ts',
+    BODY_HASH_MISMATCH: 'cli/synthesize.test.ts',
+    CITATIONS_REMOVED: 'cli/synthesize.test.ts',
     PROVENANCE_SOURCE_INACTIVE: 'cli/commands/query.test.ts',
 
     // --- Hierarchy / batch structure ---

@@ -57,6 +57,12 @@ describe('hint registry', () => {
       }
     }
   });
+
+  it('keeps CITATIONS_REMOVED informational rather than reminder-style guidance', () => {
+    expect(HINTS.CITATIONS_REMOVED).toBe(
+      'The ids field lists current claims whose citations were removed from the node body.',
+    );
+  });
 });
 
 describe('verify-check → code map', () => {

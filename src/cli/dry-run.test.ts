@@ -52,13 +52,13 @@ function writePayload(payload: unknown): string {
   return file;
 }
 
-function claimPayload(): unknown {
+function claimPayload(text = 'The widget service caches in Redis.'): unknown {
   return {
     source_id: sourceId,
     claims: [
       {
         node_id: nodeId,
-        text: 'The widget service caches in Redis.',
+        text,
         claim_type: 'fact',
         confidence: 0.9,
         spans: [{ chunk_id: chunkId, quote: 'caches results in Redis' }],
@@ -99,6 +99,53 @@ describe('claim apply --dry-run (03 §2)', () => {
       expect.objectContaining({ command: `kb claim apply --file=${file} --json` }),
     ]);
     expect(dry.json.hints).toEqual([]);
+    expect(
+      (dry.json.data as { claims: Array<{ reviewCandidates: unknown }> }).claims[0]!
+        .reviewCandidates,
+    ).toEqual({ matched: 0, shown: 0, complete: true, items: [] });
+  });
+
+  it('surfaces near-duplicate review candidates and one adjudication hint only in dry-run', async () => {
+    const existingFile = writePayload(
+      claimPayload('The widget service caches results in Redis.'),
+    );
+    const existing = await runIo(['claim', 'apply', '--file', existingFile]);
+    const existingClaimId = (
+      existing.json.data as { claims: Array<{ claimId: string }> }
+    ).claims[0]!.claimId;
+
+    const proposedFile = writePayload(claimPayload());
+    const dry = await runIo(['claim', 'apply', '--file', proposedFile, '--dry-run']);
+    const dryRow = (
+      dry.json.data as {
+        claims: Array<{
+          reviewCandidates: {
+            matched: number;
+            shown: number;
+            complete: boolean;
+            items: Array<{ claimId: string }>;
+          };
+        }>;
+      }
+    ).claims[0]!;
+
+    expect(dryRow.reviewCandidates).toMatchObject({
+      matched: 1,
+      shown: 1,
+      complete: true,
+    });
+    expect(dryRow.reviewCandidates.items.map((item) => item.claimId)).toEqual([
+      existingClaimId,
+    ]);
+    expect(dry.json.hints).toHaveLength(1);
+    expect(dry.json.hints[0]).toContain('kb claim supersede');
+    expect(dry.json.hints[0]).toContain('kb claim conflict');
+
+    const real = await runIo(['claim', 'apply', '--file', proposedFile]);
+    expect(
+      (real.json.data as { claims: Array<Record<string, unknown>> }).claims[0]!
+        .reviewCandidates,
+    ).toBeUndefined();
   });
 
   it('preserves an explicit --kb and shell-quotes a spaced payload path in the steered re-run', async () => {
@@ -199,7 +246,7 @@ describe('synthesize --dry-run (03 §2)', () => {
     expect((node.json.data as { node: { isStale: boolean } }).node.isStale).toBe(true);
     const claimId = (node.json.data as { claims: Array<{ id: string }> }).claims[0]!.id;
 
-    const synthFile = writePayload({ node_id: nodeId, body_md: `Caches in Redis.[^${claimId}]` });
+    const synthFile = writePayload({ node_id: nodeId, expected_body_hash: '', body_md: `Caches in Redis.[^${claimId}]` });
     const dry = await runIo(['synthesize', '--file', synthFile, '--dry-run']);
 
     expect(dry.code).toBe(0);

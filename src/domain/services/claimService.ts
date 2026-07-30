@@ -7,6 +7,10 @@ import { deriveClaimId } from '../algorithms/idDeriver.js';
 import { resolveSpanCandidate, persistSpan, spanIdFor, spanRangeKey, type SpanCandidate } from './spanResolver.js';
 import { DomainIssueError, formatPath } from '../issueCodes.js';
 import type { SpanRole } from '../schemas/enums.js';
+import {
+  candidatesForClaim,
+  type ClaimCandidateSet,
+} from './claimCandidates.js';
 
 export type ClaimOutcome = 'created' | 'updated' | 'unchanged';
 
@@ -25,6 +29,8 @@ export interface ClaimInputReceipt {
   claimId: ClaimId;
   outcome: ClaimOutcome;
   spans: ClaimInputSpans;
+  /** Advisory lexical review, present only on `claim apply --dry-run`. */
+  reviewCandidates?: ClaimCandidateSet;
 }
 
 export interface ClaimApplyTotals {
@@ -56,6 +62,12 @@ export interface ClaimApplyReceipt {
   claimsUpdated: number;
   affectedNodes: number;
   spansCreatedNet: number;
+}
+
+export interface ClaimSupersedeReceipt {
+  superseded: ClaimId;
+  by: ClaimId;
+  staleNodes: number;
 }
 
 /** One resolved span ref, classified against the DB *and* the batch before any write. */
@@ -110,6 +122,88 @@ export class ClaimService {
   constructor(private readonly ctx: ServiceContext) {}
 
   /**
+   * Supersede an existing claim with an active, span-backed claim. The integrity
+   * pins live in the service so every caller gets the same cycle and provenance
+   * guarantees, including supersessions across sibling subtrees.
+   */
+  supersede(oldClaimId: ClaimId, supersedingClaimId: ClaimId): ClaimSupersedeReceipt {
+    const { repos } = this.ctx;
+
+    if (oldClaimId === supersedingClaimId) {
+      throw new DomainIssueError(
+        'INVALID_ARGUMENT',
+        `self-supersession is not allowed: old claim ${oldClaimId} equals superseding claim ${supersedingClaimId}`,
+        { ids: [oldClaimId, supersedingClaimId] },
+      );
+    }
+
+    const oldClaim = repos.claims.getById(oldClaimId);
+    if (!oldClaim) {
+      throw new DomainIssueError('UNKNOWN_CLAIM', `unknown claim ${oldClaimId}`, { ids: [oldClaimId] });
+    }
+
+    const supersedingClaim = repos.claims.getById(supersedingClaimId);
+    if (!supersedingClaim) {
+      throw new DomainIssueError(
+        'INVALID_ARGUMENT',
+        `superseding claim ${supersedingClaimId} does not exist`,
+        { ids: [supersedingClaimId] },
+      );
+    }
+
+    const visited = new Set<ClaimId>();
+    let current: Claim | undefined = supersedingClaim;
+    while (current && !visited.has(current.id)) {
+      if (current.id === oldClaimId) {
+        throw new DomainIssueError(
+          'INVALID_ARGUMENT',
+          `supersession cycle is not allowed: superseding chain from ${supersedingClaimId} reaches old claim ${oldClaimId}`,
+          { ids: [oldClaimId, supersedingClaimId] },
+        );
+      }
+      visited.add(current.id);
+      current = current.supersededByClaimId
+        ? repos.claims.getById(current.supersededByClaimId)
+        : undefined;
+    }
+
+    if (supersedingClaim.status !== 'active') {
+      throw new DomainIssueError(
+        'INVALID_ARGUMENT',
+        `superseding claim ${supersedingClaimId} must be active (status: ${supersedingClaim.status})`,
+        { ids: [supersedingClaimId] },
+      );
+    }
+
+    if (repos.claimSpans.listByClaim(supersedingClaimId).length === 0) {
+      throw new DomainIssueError(
+        'INVALID_ARGUMENT',
+        `superseding claim ${supersedingClaimId} must have at least one live span`,
+        { ids: [supersedingClaimId] },
+      );
+    }
+
+    const now = this.ctx.now();
+    repos.tx(() => {
+      repos.claims.setStatus(oldClaim.id, 'superseded', supersedingClaim.id, now);
+      if (oldClaim.nodeId) repos.nodes.markStaleWithAncestors(oldClaim.nodeId, now);
+      if (supersedingClaim.nodeId) repos.nodes.markStaleWithAncestors(supersedingClaim.nodeId, now);
+      repos.changelog.append({
+        ts: now,
+        op: 'claim_supersede',
+        summary: `Claim ${oldClaim.id} superseded by ${supersedingClaim.id}`,
+        detail: { old: oldClaim.id, by: supersedingClaim.id },
+      });
+    });
+
+    return {
+      superseded: oldClaim.id,
+      by: supersedingClaim.id,
+      staleNodes: repos.nodes.listStaleDeepestFirst().length,
+    };
+  }
+
+  /**
    * Persist agent-extracted claims with quote-verified provenance, atomically, and
    * return an actionable per-input receipt (03 §3.1). Each input is CLASSIFIED from
    * span candidates + `(claim_id, span_id)` link lookups BEFORE any write (03 §4.1),
@@ -118,7 +212,10 @@ export class ClaimService {
    * `created + updated > 0`. Any failure (unknown node/chunk, unverifiable quote)
    * rolls the whole batch back.
    */
-  apply(payload: ClaimApply): ClaimApplyReceipt {
+  apply(
+    payload: ClaimApply,
+    options: { reviewCandidates?: boolean } = {},
+  ): ClaimApplyReceipt {
     const { repos } = this.ctx;
     const now = this.ctx.now();
     const source = repos.sources.getById(payload.source_id);
@@ -176,6 +273,18 @@ export class ClaimService {
         totals.linksReused += acc.linksReused;
         totals.linksUpdated += plan.refs.filter((r) => r.linkUpdated).length;
         rows.push({ inputIndex: ci, claimId: plan.claim.id, outcome: plan.outcome, spans: acc });
+      }
+
+      if (options.reviewCandidates) {
+        const batchClaimIds = plans.map((plan) => plan.claim.id);
+        for (let index = 0; index < plans.length; index++) {
+          const plan = plans[index]!;
+          rows[index]!.reviewCandidates = candidatesForClaim(repos, {
+            nodeId: plan.claim.nodeId,
+            text: plan.claim.text,
+            excludeClaimIds: batchClaimIds,
+          });
+        }
       }
 
       for (const nodeId of affected) repos.nodes.markStaleWithAncestors(nodeId, now);

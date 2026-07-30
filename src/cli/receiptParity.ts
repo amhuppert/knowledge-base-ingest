@@ -64,7 +64,19 @@ export function receiptProjection(data: unknown): Record<string, unknown> {
   if (data === null || typeof data !== 'object') return {};
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
-    if (PROJECTION_SET.has(key)) out[key] = value;
+    if (!PROJECTION_SET.has(key)) continue;
+    if (key === 'claims' && Array.isArray(value)) {
+      out[key] = value.map((row) => {
+        if (row === null || typeof row !== 'object') return row;
+        const { reviewCandidates: _previewOnly, ...projected } = row as Record<
+          string,
+          unknown
+        >;
+        return projected;
+      });
+    } else {
+      out[key] = value;
+    }
   }
   return out;
 }

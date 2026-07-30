@@ -159,6 +159,7 @@ function assertNoRemovedGraphFields(raw: unknown): void {
 export const SynthesizeSchema = z
   .object({
     node_id: zNodeId,
+    expected_body_hash: z.string(),
     title: z.string().min(1).optional(),
     summary: z.string().optional(),
     body_md: z.string(),

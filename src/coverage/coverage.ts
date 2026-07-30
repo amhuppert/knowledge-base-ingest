@@ -1,6 +1,9 @@
 import type { Repositories } from '../db/repositories/index.js';
 import { extractCitations } from '../domain/algorithms/citations.js';
-import { makeClaimId } from '../domain/ids.js';
+import { classifyChunkText } from '../domain/algorithms/chunkKind.js';
+import { makeClaimId, type SourceId } from '../domain/ids.js';
+import type { ClaimStatus, SourceStatus } from '../domain/schemas/enums.js';
+import { candidatesForClaim } from '../domain/services/claimCandidates.js';
 
 /**
  * COVERAGE (06 §3) — read-only, descriptive completeness checks.
@@ -27,6 +30,9 @@ export const COVERAGE_CHECKS = [
 
 export type CoverageCode = (typeof COVERAGE_CHECKS)[number];
 
+/** Maximum ids surfaced for any coverage inventory or issue; totals remain exact. */
+export const COVERAGE_ID_CAP = 20;
+
 /** One check's result: the code plus every matching id, lexicographically sorted. */
 export interface CoverageFinding {
   code: CoverageCode;
@@ -36,11 +42,70 @@ export interface CoverageFinding {
 /** The full coverage report: exactly one finding per check, in `COVERAGE_CHECKS` order. */
 export interface CoverageReport {
   findings: CoverageFinding[];
+  structuralChunks: { total: number; shown: number; ids: string[] };
+}
+
+export interface CappedCoverageIds {
+  total: number;
+  shown: number;
+  ids: string[];
+}
+
+export type SourceCoverageCode =
+  | 'SOURCE_NO_CLAIMS'
+  | 'CHUNK_UNCITED'
+  | 'CLAIM_NOT_SYNTHESIZED'
+  | 'OPEN_QUESTION_NOT_SYNTHESIZED';
+
+export interface CoverageSourceReport {
+  scope: {
+    kind: 'source';
+    sourceId: SourceId;
+    title: string;
+    sourceStatus: SourceStatus;
+    membership: 'evidence-span';
+  };
+  chunks: {
+    total: number;
+    substantive: number;
+    cited: number;
+    uncited: CappedCoverageIds;
+    structural: CappedCoverageIds;
+  };
+  claims: {
+    active: {
+      total: number;
+      synthesized: number;
+      unsynthesized: CappedCoverageIds;
+    };
+    conflicted: CappedCoverageIds;
+    superseded: CappedCoverageIds;
+    retracted: CappedCoverageIds;
+  };
+  relationships: {
+    total: number;
+    byStatus: Record<ClaimStatus, number>;
+  };
+  candidates: {
+    total: number;
+    shown: number;
+    claimIds: string[];
+  };
+  findings: Array<CappedCoverageIds & { code: SourceCoverageCode }>;
 }
 
 /** Raw `{ id }` rows → their id strings. */
 function ids(rows: unknown[]): string[] {
   return rows.map((r) => (r as { id: string }).id);
+}
+
+function cappedIds(values: string[]): CappedCoverageIds {
+  const sorted = [...values].sort();
+  return {
+    total: sorted.length,
+    shown: Math.min(sorted.length, COVERAGE_ID_CAP),
+    ids: sorted.slice(0, COVERAGE_ID_CAP),
+  };
 }
 
 export function coverage(repos: Repositories): CoverageReport {
@@ -67,10 +132,9 @@ export function coverage(repos: Repositories): CoverageReport {
   // CHUNK_UNCITED — chunks of active sources with no overlapping span that carries a
   // live claim_spans link (to an active/conflicted claim) OR a live relationship_spans
   // link. Half-open overlap; orphan spans (links deleted) do not cover.
-  const chunkUncited = ids(
-    db
-      .prepare(
-        `SELECT ch.id AS id FROM source_chunks ch
+  const uncitedChunkRows = db
+    .prepare(
+      `SELECT ch.id AS id, ch.text AS text FROM source_chunks ch
             JOIN sources s ON s.id = ch.source_id
            WHERE s.status = 'active'
              AND NOT EXISTS (
@@ -84,9 +148,32 @@ export function coverage(repos: Repositories): CoverageReport {
                   )
              )
            ORDER BY ch.id`,
+    )
+    .all() as Array<{ id: string; text: string }>;
+  const chunkUncited = uncitedChunkRows
+    .filter((chunk) => classifyChunkText(chunk.text) === 'substantive')
+    .map((chunk) => chunk.id);
+
+  // Structural chunks are neutral inventory, never findings. Inventory includes every
+  // structural chunk of an active source, whether or not a live span overlaps it.
+  const structuralChunkIds = (
+    db
+      .prepare(
+        `SELECT ch.id AS id, ch.text AS text FROM source_chunks ch
+           JOIN sources s ON s.id = ch.source_id
+          WHERE s.status = 'active'
+          ORDER BY ch.id`,
       )
-      .all(),
-  );
+      .all() as Array<{ id: string; text: string }>
+  )
+    .filter((chunk) => classifyChunkText(chunk.text) === 'structural')
+    .map((chunk) => chunk.id);
+  const structuralShown = Math.min(structuralChunkIds.length, COVERAGE_ID_CAP);
+  const structuralChunks = {
+    total: structuralChunkIds.length,
+    shown: structuralShown,
+    ids: structuralChunkIds.slice(0, COVERAGE_ID_CAP),
+  };
 
   // The set of every claim id cited across all node bodies (the same extractor verify
   // and the renderer use). Conflicted claims never surface here — they are excluded
@@ -133,5 +220,148 @@ export function coverage(repos: Repositories): CoverageReport {
     OPEN_QUESTION_NOT_SYNTHESIZED: openQuestionNotSynthesized,
   };
 
-  return { findings: COVERAGE_CHECKS.map((code) => ({ code, ids: byCode[code] })) };
+  return {
+    findings: COVERAGE_CHECKS.map((code) => ({ code, ids: byCode[code] })),
+    structuralChunks,
+  };
+}
+
+/**
+ * Describe the graph and synthesis contribution of one source. Claim and
+ * relationship membership comes exclusively from the canonical evidence-span
+ * contribution repository; first-seen provenance is never consulted.
+ */
+export function coverageForSource(repos: Repositories, sourceId: SourceId): CoverageSourceReport {
+  const source = repos.sources.getById(sourceId);
+  if (!source) throw new Error(`Unknown source: ${sourceId}`);
+
+  const chunkRows = repos.db
+    .prepare(
+      `SELECT ch.id AS id, ch.text AS text,
+              EXISTS (
+                SELECT 1 FROM spans sp
+                 WHERE sp.source_id = ch.source_id
+                   AND sp.char_start < ch.char_end AND sp.char_end > ch.char_start
+                   AND (
+                     EXISTS (
+                       SELECT 1 FROM claim_spans cs
+                         JOIN claims c ON c.id = cs.claim_id
+                        WHERE cs.span_id = sp.id AND c.status IN ('active','conflicted')
+                     )
+                     OR EXISTS (
+                       SELECT 1 FROM relationship_spans rs WHERE rs.span_id = sp.id
+                     )
+                   )
+              ) AS cited
+         FROM source_chunks ch
+        WHERE ch.source_id = ?
+        ORDER BY ch.id`,
+    )
+    .all(sourceId) as Array<{ id: string; text: string; cited: 0 | 1 }>;
+  const substantiveChunks = chunkRows.filter(
+    (chunk) => classifyChunkText(chunk.text) === 'substantive',
+  );
+  const structuralChunks = chunkRows.filter(
+    (chunk) => classifyChunkText(chunk.text) === 'structural',
+  );
+  const uncitedChunkIds = substantiveChunks
+    .filter((chunk) => chunk.cited === 0)
+    .map((chunk) => chunk.id);
+
+  const contributions = repos.sourceContribution.claimsEvidencedBy(sourceId);
+  const byClaimStatus: Record<ClaimStatus, typeof contributions> = {
+    active: [],
+    conflicted: [],
+    superseded: [],
+    retracted: [],
+  };
+  for (const contribution of contributions) byClaimStatus[contribution.status].push(contribution);
+
+  const citedClaimIds = new Set<string>();
+  for (const node of repos.nodes.listAll()) {
+    for (const claimId of extractCitations(node.bodyMd)) citedClaimIds.add(claimId);
+  }
+  const unsynthesizedActive = byClaimStatus.active.filter(
+    (claim) => !citedClaimIds.has(claim.claimId),
+  );
+  const unsynthesizedIds = unsynthesizedActive.map((claim) => claim.claimId);
+  const openQuestionIds = unsynthesizedActive
+    .filter((claim) => claim.claimType === 'open_question')
+    .map((claim) => claim.claimId);
+
+  const relationshipContributions = repos.sourceContribution.relationshipsEvidencedBy(sourceId);
+  const relationshipByStatus: Record<ClaimStatus, number> = {
+    active: 0,
+    superseded: 0,
+    conflicted: 0,
+    retracted: 0,
+  };
+  for (const relationship of relationshipContributions) {
+    relationshipByStatus[relationship.status] += 1;
+  }
+
+  const sourceNoClaims =
+    byClaimStatus.active.length + byClaimStatus.conflicted.length === 0 ? [sourceId] : [];
+  const uncited = cappedIds(uncitedChunkIds);
+  const unsynthesized = cappedIds(unsynthesizedIds);
+  const candidateClaimIds = byClaimStatus.active
+    .filter((contribution) => {
+      const claim = repos.claims.getById(contribution.claimId);
+      if (!claim) {
+        throw new Error(
+          `source contribution references missing claim ${contribution.claimId}`,
+        );
+      }
+      return (
+        candidatesForClaim(repos, {
+          nodeId: claim.nodeId,
+          text: claim.text,
+          excludeClaimIds: [claim.id],
+        }).matched > 0
+      );
+    })
+    .map((contribution) => contribution.claimId);
+  const cappedCandidates = cappedIds(candidateClaimIds);
+
+  return {
+    scope: {
+      kind: 'source',
+      sourceId,
+      title: source.title,
+      sourceStatus: source.status,
+      membership: 'evidence-span',
+    },
+    chunks: {
+      total: chunkRows.length,
+      substantive: substantiveChunks.length,
+      cited: substantiveChunks.length - uncitedChunkIds.length,
+      uncited,
+      structural: cappedIds(structuralChunks.map((chunk) => chunk.id)),
+    },
+    claims: {
+      active: {
+        total: byClaimStatus.active.length,
+        synthesized: byClaimStatus.active.length - unsynthesizedActive.length,
+        unsynthesized,
+      },
+      conflicted: cappedIds(byClaimStatus.conflicted.map((claim) => claim.claimId)),
+      superseded: cappedIds(byClaimStatus.superseded.map((claim) => claim.claimId)),
+      retracted: cappedIds(byClaimStatus.retracted.map((claim) => claim.claimId)),
+    },
+    relationships: {
+      total: relationshipContributions.length,
+      byStatus: relationshipByStatus,
+    },
+    candidates: {
+      total: cappedCandidates.total,
+      shown: cappedCandidates.shown,
+      claimIds: cappedCandidates.ids,
+    },
+    findings: [
+      { code: 'SOURCE_NO_CLAIMS', ...cappedIds(sourceNoClaims) },
+      { code: 'CHUNK_UNCITED', ...uncited },
+      { code: 'CLAIM_NOT_SYNTHESIZED', ...unsynthesized },
+      { code: 'OPEN_QUESTION_NOT_SYNTHESIZED', ...cappedIds(openQuestionIds) },
+    ],
+  };
 }

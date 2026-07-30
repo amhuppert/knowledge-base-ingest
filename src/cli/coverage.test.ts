@@ -29,7 +29,10 @@ interface Issue {
 }
 interface Env {
   ok: boolean;
-  data: { summary: Summary } | null;
+  data: {
+    summary: Summary;
+    structuralChunks: { total: number; shown: number; ids: string[] };
+  } | null;
   issues: Issue[];
   nextActions: unknown[];
   hints: string[];
@@ -92,7 +95,7 @@ describe('kb coverage — findings never fail the run', () => {
     kb = mkdtempSync(join(tmpdir(), 'kb-coverage-findings-'));
     await run(['init', kb]);
     const doc = join(kb, 'lonely.md');
-    writeFileSync(doc, '# Lonely\n\nThis source is ingested but never given any claims.\n');
+    writeFileSync(doc, '# Lonely\n## Details\nThis source is ingested but never given any claims.\n');
     await run(['ingest', doc]);
   });
   afterAll(() => rmSync(kb, { recursive: true, force: true }));
@@ -106,6 +109,24 @@ describe('kb coverage — findings never fail the run', () => {
     expect(src!.severity).toBe('info');
     expect(src!.message).toContain('(1 of 1 shown)');
     expect(r.env.data!.summary.SOURCE_NO_CLAIMS).toEqual({ total: 1, shown: 1 });
+  });
+
+  it('reports heading-only chunks as structural inventory, not CHUNK_UNCITED findings', async () => {
+    const r = await run(['coverage']);
+    const db = openDb(join(kb, DB_FILENAME));
+    const heading = (
+      db.prepare(`SELECT id, text FROM source_chunks ORDER BY id`).all() as Array<{
+        id: string;
+        text: string;
+      }>
+    ).find((chunk) => chunk.text.trim() === '# Lonely')!;
+    db.close();
+
+    expect(r.env.data!.structuralChunks).toEqual({ total: 1, shown: 1, ids: [heading.id] });
+    expect(r.env.issues.find((issue) => issue.code === 'CHUNK_UNCITED')?.ids).not.toContain(heading.id);
+    expect(r.env.issues.find((issue) => issue.code === 'CHUNK_UNCITED')?.message).toContain(
+      'substantive chunk(s)',
+    );
   });
 });
 

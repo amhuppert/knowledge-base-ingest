@@ -170,7 +170,7 @@ export function registerNode(group: Command, ctx: RunContext): void {
       atomic: false,
       supportsDryRun: false,
       workflow: 'Inspect a node’s claims before synthesizing its prose; --context returns everything one synthesize write needs.',
-      related: ['node tree', 'synthesize', 'provenance'],
+      related: ['node tree', 'synthesize', 'provenance', 'source impact'],
       examples: [
         { description: 'Show a node and its claims', command: 'kb node show nod_1a2b3c --json' },
         { description: 'Read the synthesis bundle for a node', command: 'kb node show nod_1a2b3c --context --json' },

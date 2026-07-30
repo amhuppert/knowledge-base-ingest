@@ -54,7 +54,7 @@ preflight → discover → preview → apply → resume → finish
 | preview | Dry-run every authored payload; branch on the issue `code` | `--dry-run` on the five commands above |
 | apply | Apply the **unchanged** validated payload; consume the receipt | `… --json` |
 | resume | Restart from state, not from step 1 | `kb status --json`, `kb node tree --json` (stale flags), receipts' `nextActions` |
-| finish | Explicit terminal condition | `kb verify --strict --json` → `kb render --json` → `kb render --check --json`; then review `kb coverage --json` |
+| finish | Review every source, then run the terminal gates | per source: `kb coverage --source <source_id> --json` → `kb relationship list --source <source_id> --json`; then `kb verify --strict --json` → `kb render --json` → `kb render --check --json` |
 
 ## Recovery by issue code
 
@@ -185,26 +185,35 @@ unsure about is safe.
 
 ### 6. finish — definition of done
 
+For each ingested source, review its scoped completeness and exact graph contribution:
+
 ```
-kb verify --strict --json      # must be ok:true
-kb render --json               # regenerate kb/*.md
-kb render --check --json       # must report no drift
-kb coverage --json             # descriptive, not a gate
+kb coverage --source <source_id> --json
+kb relationship list --source <source_id> --json
 ```
 
-You are done only when **all three** hold:
+Fix each actionable scoped-coverage finding, or explicitly accept it with a reason.
+After every source passes that review, run the terminal gates:
 
+```
+kb verify --strict --json
+kb render --json
+kb render --check --json
+```
+
+You are done only when **all four** hold:
+
+- every source's actionable coverage findings are fixed or explicitly accepted with reasons,
+- every source's exact relationship contribution has been reviewed,
 - `verify --strict` is `ok:true`,
-- `render --check` reports no drift,
-- **every `kb coverage` finding is either actioned or consciously accepted in your
-  report to the user.** Coverage is descriptive — `SOURCE_NO_CLAIMS`,
-  `CHUNK_UNCITED`, `CLAIM_NOT_SYNTHESIZED`, `NODE_SINGLE_SOURCE`,
-  `OPEN_QUESTION_NOT_SYNTHESIZED`. Each `summary` entry states `total` vs `shown`, so
-  say the real totals; ids are capped at 20 and nothing is silently truncated.
+- `render --check` reports no drift.
 
 Then report: sources ingested, the node hierarchy, claim/entity/relationship counts,
-conflicts recorded, the coverage findings you accepted and why, and where to read it
-(`<kb-dir>/kb/index.md`).
+conflicts recorded, each source's scoped coverage summary and relationship review,
+accepted findings with reasons, and where to read it (`<kb-dir>/kb/index.md`).
+
+Optional backlog context: `kb coverage --json`. Corpus coverage is descriptive and is
+not the verdict on whether any individual source is complete.
 
 ## Judgment (the part the CLI cannot do)
 

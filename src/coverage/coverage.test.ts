@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, rmSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { openDb } from '../db/connection.js';
 import { migrate } from '../db/migrate.js';
 import { Repositories } from '../db/repositories/index.js';
@@ -13,7 +13,19 @@ import { NodeService } from '../domain/services/nodeService.js';
 import { ClaimApplySchema, GraphApplySchema } from '../domain/schemas/agent.js';
 import type { Chunk } from '../domain/schemas/models.js';
 import type { SourceId } from '../domain/ids.js';
-import { coverage, COVERAGE_CHECKS, type CoverageCode } from './coverage.js';
+import { runCli, type CliIo } from '../cli/runCli.js';
+import {
+  seedCrossSourceKb,
+  type FixtureCliResult,
+  type FixtureCliRun,
+} from '../cli/test-fixtures.js';
+import { DB_FILENAME } from '../kb/workspace.js';
+import {
+  coverage,
+  coverageForSource,
+  COVERAGE_CHECKS,
+  type CoverageCode,
+} from './coverage.js';
 
 /**
  * COVERAGE (06 §3). The five descriptive checks over live provenance links.
@@ -186,6 +198,33 @@ describe('coverage — CHUNK_UNCITED (live claim OR relationship link, half-open
     );
     expect(idsFor(ws, 'CHUNK_UNCITED')).not.toContain(chunk.id);
   });
+
+  it('excludes heading-only chunks and inventories them as structural', () => {
+    const ws = makeWs();
+    const src = ingest(ws, '# Structural\n## Details\nSubstantive prose without evidence.\n');
+    const heading = chunkWith(ws, src, '# Structural');
+    const prose = chunkWith(ws, src, 'Substantive prose');
+
+    const report = coverage(ws.repos);
+
+    expect(idsFor(ws, 'CHUNK_UNCITED')).toContain(prose.id);
+    expect(idsFor(ws, 'CHUNK_UNCITED')).not.toContain(heading.id);
+    expect(report.structuralChunks).toEqual({ total: 1, shown: 1, ids: [heading.id] });
+  });
+
+  it('caps structural chunk ids at 20 while preserving the exact total', () => {
+    const ws = makeWs();
+    for (let i = 0; i < 21; i++) {
+      ingest(ws, `# Structural ${String(i).padStart(2, '0')}\n`, `structural-${i}.md`);
+    }
+
+    const inventory = coverage(ws.repos).structuralChunks;
+
+    expect(inventory.total).toBe(21);
+    expect(inventory.shown).toBe(20);
+    expect(inventory.ids).toHaveLength(20);
+    expect(inventory.ids).toEqual([...inventory.ids].sort());
+  });
 });
 
 describe('coverage — synthesis checks (CLAIM_NOT_SYNTHESIZED, OPEN_QUESTION, NODE_SINGLE_SOURCE)', () => {
@@ -233,8 +272,8 @@ describe('coverage — synthesis checks (CLAIM_NOT_SYNTHESIZED, OPEN_QUESTION, N
     ws.db.prepare("UPDATE claims SET status='conflicted' WHERE id = ?").run(conflictedA.id);
 
     // leafA cites only its single-source fact; leafB cites both its (two-source) facts.
-    ws.nodes.synthesize({ node_id: leafA.id, body_md: `Alpha runs in Rust.[^${factA.id}]` });
-    ws.nodes.synthesize({ node_id: leafB.id, body_md: `Alpha is a systems service[^${factB1.id}] that caches.[^${factB2.id}]` });
+    ws.nodes.synthesize({ node_id: leafA.id, expected_body_hash: '', body_md: `Alpha runs in Rust.[^${factA.id}]` });
+    ws.nodes.synthesize({ node_id: leafB.id, expected_body_hash: '', body_md: `Alpha is a systems service[^${factB1.id}] that caches.[^${factB2.id}]` });
 
     return { root, leafA, leafB, factA, openA, conflictedA };
   }
@@ -276,5 +315,106 @@ describe('coverage — ordering', () => {
         .run(id, `sha-${id}`, `sources/${id}.md`, id, 'text/markdown', 1, '2026-07-23T00:00:00.000Z');
     }
     expect(idsFor(ws, 'SOURCE_NO_CLAIMS')).toEqual(['src_aaaa', 'src_bbbb', 'src_cccc']);
+  });
+});
+
+describe('coverageForSource — evidence-scoped contribution report', () => {
+  it('uses live evidence membership and partitions actionable versus historical claims', async () => {
+    const run: FixtureCliRun = async (args): Promise<FixtureCliResult> => {
+      let stdout = '';
+      const env = { ...process.env };
+      delete env.KB_DIR;
+      const io: CliIo = {
+        stdout: (chunk) => (stdout += chunk),
+        stderr: () => {},
+        cwd: process.cwd(),
+        env,
+      };
+      const code = await runCli([...args, '--json'], io);
+      return { code, json: JSON.parse(stdout || '{}') as FixtureCliResult['json'] };
+    };
+    const fixture = await seedCrossSourceKb(run);
+    const db = openDb(join(fixture.kbDir, DB_FILENAME));
+    try {
+      const repos = new Repositories(db);
+      const source = repos.sources.getById(fixture.sourceB)!;
+
+      expect(coverageForSource(repos, fixture.sourceB)).toEqual({
+        scope: {
+          kind: 'source',
+          sourceId: fixture.sourceB,
+          title: source.title,
+          sourceStatus: 'active',
+          membership: 'evidence-span',
+        },
+        chunks: {
+          total: 3,
+          substantive: 1,
+          cited: 1,
+          uncited: { total: 0, shown: 0, ids: [] },
+          structural: {
+            total: 2,
+            shown: 2,
+            ids: expect.arrayContaining([fixture.headingChunkId]),
+          },
+        },
+        claims: {
+          active: {
+            total: 3,
+            synthesized: 1,
+            unsynthesized: {
+              total: 2,
+              shown: 2,
+              ids: expect.arrayContaining([fixture.c2]),
+            },
+          },
+          conflicted: {
+            total: 2,
+            shown: 2,
+            ids: [...fixture.conflictedClaimIds].sort(),
+          },
+          superseded: {
+            total: 1,
+            shown: 1,
+            ids: [fixture.supersededClaimId],
+          },
+          retracted: { total: 0, shown: 0, ids: [] },
+        },
+        relationships: {
+          total: 1,
+          byStatus: { active: 1, superseded: 0, conflicted: 0, retracted: 0 },
+        },
+        candidates: {
+          total: 3,
+          shown: 3,
+          claimIds: [
+            fixture.c1,
+            fixture.c2,
+            fixture.supersedingClaimId,
+          ].sort(),
+        },
+        findings: [
+          { code: 'SOURCE_NO_CLAIMS', total: 0, shown: 0, ids: [] },
+          { code: 'CHUNK_UNCITED', total: 0, shown: 0, ids: [] },
+          {
+            code: 'CLAIM_NOT_SYNTHESIZED',
+            total: 2,
+            shown: 2,
+            ids: expect.arrayContaining([fixture.c2]),
+          },
+          { code: 'OPEN_QUESTION_NOT_SYNTHESIZED', total: 0, shown: 0, ids: [] },
+        ],
+      });
+
+      const contributedActiveIds = repos.sourceContribution
+        .claimsEvidencedBy(fixture.sourceB)
+        .filter((claim) => claim.status === 'active')
+        .map((claim) => claim.claimId);
+      expect(contributedActiveIds).toContain(fixture.c1);
+      expect(repos.claims.getById(fixture.c1)?.firstSeenSourceId).toBe(fixture.sourceA);
+    } finally {
+      db.close();
+      rmSync(fixture.kbDir, { recursive: true, force: true });
+    }
   });
 });

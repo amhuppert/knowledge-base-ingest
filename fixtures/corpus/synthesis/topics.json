@@ -1,8 +1,8 @@
 {
   "nodes": [
-    { "node_id": "nod_9e3ee2a275995598", "body_md": "Architecture of the RateGuard service: the rate limiter, token store, request pipeline, and caching layer." },
-    { "node_id": "nod_ead3947854c0deaf", "body_md": "The RateGuard API surface: authentication, endpoints, error responses, and pagination." },
-    { "node_id": "nod_b59826ba41efed7f", "body_md": "Operating RateGuard: deployment, monitoring, scaling, and incident response." },
-    { "node_id": "nod_69c71211bf98c0f5", "body_md": "Key decisions and open questions for RateGuard, including storage choice and the rate-limit algorithm." }
+    { "node_id": "nod_9e3ee2a275995598", "expected_body_hash": "", "body_md": "Architecture of the RateGuard service: the rate limiter, token store, request pipeline, and caching layer." },
+    { "node_id": "nod_ead3947854c0deaf", "expected_body_hash": "", "body_md": "The RateGuard API surface: authentication, endpoints, error responses, and pagination." },
+    { "node_id": "nod_b59826ba41efed7f", "expected_body_hash": "", "body_md": "Operating RateGuard: deployment, monitoring, scaling, and incident response." },
+    { "node_id": "nod_69c71211bf98c0f5", "expected_body_hash": "", "body_md": "Key decisions and open questions for RateGuard, including storage choice and the rate-limit algorithm." }
   ]
 }

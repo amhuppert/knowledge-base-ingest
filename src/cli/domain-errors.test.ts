@@ -164,6 +164,7 @@ describe('domain errors surface as registry codes through the CLI (03 §1)', () 
     // CITATION_UNKNOWN (precedence rule 1), replacing the old existence-only UNKNOWN_CLAIM.
     const r = await apply('synthesize', null, {
       node_id: nodeId,
+      expected_body_hash: '',
       body_md: 'Bogus.[^clm_deadbeefdeadbeef]',
     });
     expect(r.code).toBe(1);

@@ -98,8 +98,8 @@ describe('claim apply steering (criterion 7)', () => {
     await runIo(['claim', 'apply', '--file', writePayload(claimPayload())]);
     const shown = await runIo(['node', 'show', nodeId]);
     const claimId = (shown.json.data as { claims: Array<{ id: string }> }).claims[0]!.id;
-    await runIo(['synthesize', '--file', writePayload({ node_id: nodeId, body_md: `Caches.[^${claimId}]` })]);
-    await runIo(['synthesize', '--file', writePayload({ node_id: rootId, body_md: 'Overview.' })]);
+    await runIo(['synthesize', '--file', writePayload({ node_id: nodeId, expected_body_hash: '', body_md: `Caches.[^${claimId}]` })]);
+    await runIo(['synthesize', '--file', writePayload({ node_id: rootId, expected_body_hash: '', body_md: 'Overview.' })]);
 
     const repeat = await runIo(['claim', 'apply', '--file', writePayload(claimPayload())]);
     expect(repeat.code).toBe(0);

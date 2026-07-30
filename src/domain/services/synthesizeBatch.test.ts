@@ -113,15 +113,19 @@ function issuesFrom(fn: () => unknown): DomainIssue[] {
   throw new Error('expected the batch to reject');
 }
 
+function bodyHashOf(f: Fixture, nodeId: NodeId): string {
+  return f.repos.nodes.getById(nodeId)!.bodyHash;
+}
+
 describe('NodeService.synthesizeBatch — prevalidation is atomic (04 §3)', () => {
   it('rejects ONE bad citation among good nodes with a nodes[i]-prefixed path and applies nothing', () => {
     const f = setup();
     const issues = issuesFrom(() =>
       f.nodes.synthesizeBatch({
         nodes: [
-          { node_id: f.leafAId, body_md: `Rotation.[^${f.claimAId}]` },
-          { node_id: f.leafBId, body_md: 'Storage.[^clm_deadbeefdeadbeef]' },
-          { node_id: f.topicId, body_md: `Sessions.[^${f.claimBId}]` },
+          { node_id: f.leafAId, expected_body_hash: bodyHashOf(f, f.leafAId), body_md: `Rotation.[^${f.claimAId}]` },
+          { node_id: f.leafBId, expected_body_hash: bodyHashOf(f, f.leafBId), body_md: 'Storage.[^clm_deadbeefdeadbeef]' },
+          { node_id: f.topicId, expected_body_hash: bodyHashOf(f, f.topicId), body_md: `Sessions.[^${f.claimBId}]` },
         ],
       }),
     );
@@ -141,8 +145,8 @@ describe('NodeService.synthesizeBatch — prevalidation is atomic (04 §3)', () 
     const issues = issuesFrom(() =>
       f.nodes.synthesizeBatch({
         nodes: [
-          { node_id: f.leafAId, body_md: `Cross-cite.[^${f.claimBId}]` },
-          { node_id: 'nod_absent0000000' as NodeId, body_md: 'Nowhere.' },
+          { node_id: f.leafAId, expected_body_hash: bodyHashOf(f, f.leafAId), body_md: `Cross-cite.[^${f.claimBId}]` },
+          { node_id: 'nod_absent0000000' as NodeId, expected_body_hash: '', body_md: 'Nowhere.' },
         ],
       }),
     );
@@ -166,7 +170,7 @@ describe('NodeService.synthesizeBatch — deepest-first application order (04 §
     // leafA is pre-synthesized then re-staled, so its identical replay in the batch takes
     // the `stale-cleared` path — putting `clearStale` into the same ordered call log.
     const bodyA = `Rotation.[^${f.claimAId}]`;
-    f.nodes.synthesize({ node_id: f.leafAId, body_md: bodyA });
+    f.nodes.synthesize({ node_id: f.leafAId, expected_body_hash: bodyHashOf(f, f.leafAId), body_md: bodyA });
     f.repos.nodes.markStaleWithAncestors(f.leafAId, '2026-07-24T00:01:00.000Z');
 
     const calls: Array<{ method: 'updateBody' | 'clearStale'; id: string }> = [];
@@ -183,10 +187,10 @@ describe('NodeService.synthesizeBatch — deepest-first application order (04 §
 
     const receipt = f.nodes.synthesizeBatch({
       nodes: [
-        { node_id: f.rootId, body_md: `Auth overview.[^${f.claimAId}]` }, // depth 0, index 0
-        { node_id: f.leafBId, body_md: `Storage.[^${f.claimBId}]` }, //      depth 2, index 1
-        { node_id: f.topicId, body_md: `Sessions.[^${f.claimBId}]` }, //     depth 1, index 2
-        { node_id: f.leafAId, body_md: bodyA }, //                           depth 2, index 3 (replay)
+        { node_id: f.rootId, expected_body_hash: bodyHashOf(f, f.rootId), body_md: `Auth overview.[^${f.claimAId}]` }, // depth 0, index 0
+        { node_id: f.leafBId, expected_body_hash: bodyHashOf(f, f.leafBId), body_md: `Storage.[^${f.claimBId}]` }, //      depth 2, index 1
+        { node_id: f.topicId, expected_body_hash: bodyHashOf(f, f.topicId), body_md: `Sessions.[^${f.claimBId}]` }, //     depth 1, index 2
+        { node_id: f.leafAId, expected_body_hash: bodyHashOf(f, f.leafAId), body_md: bodyA }, //                           depth 2, index 3 (replay)
       ],
     });
 
@@ -210,7 +214,7 @@ describe('NodeService.synthesizeBatch — deepest-first application order (04 §
     const { f, calls, receipt } = orderedBatchFixture();
 
     expect(receipt.nodes.map((n) => n.nodeId)).toEqual(calls.map((c) => c.id));
-    expect(receipt.nodes).toEqual([
+    expect(receipt.nodes).toMatchObject([
       { inputIndex: 1, nodeId: f.leafBId, depth: 2, outcome: 'updated' },
       { inputIndex: 3, nodeId: f.leafAId, depth: 2, outcome: 'stale-cleared' },
       { inputIndex: 2, nodeId: f.topicId, depth: 1, outcome: 'updated' },
@@ -229,16 +233,16 @@ describe('NodeService.synthesizeBatch — per-node outcomes (04 §3, Phase 1 sem
     const bodyA = `Rotation.[^${f.claimAId}]`;
     const bodyB = `Storage.[^${f.claimBId}]`;
     // leafA: synthesized and left FRESH → an identical replay is `unchanged`.
-    f.nodes.synthesize({ node_id: f.leafAId, body_md: bodyA });
+    f.nodes.synthesize({ node_id: f.leafAId, expected_body_hash: bodyHashOf(f, f.leafAId), body_md: bodyA });
     // leafB: synthesized then re-staled → an identical replay is `stale-cleared`.
-    f.nodes.synthesize({ node_id: f.leafBId, body_md: bodyB });
+    f.nodes.synthesize({ node_id: f.leafBId, expected_body_hash: bodyHashOf(f, f.leafBId), body_md: bodyB });
     f.repos.nodes.markStaleWithAncestors(f.leafBId, '2026-07-24T00:02:00.000Z');
 
     const receipt = f.nodes.synthesizeBatch({
       nodes: [
-        { node_id: f.leafAId, body_md: bodyA },
-        { node_id: f.leafBId, body_md: bodyB },
-        { node_id: f.topicId, body_md: `Sessions.[^${f.claimBId}]` },
+        { node_id: f.leafAId, expected_body_hash: bodyHashOf(f, f.leafAId), body_md: bodyA },
+        { node_id: f.leafBId, expected_body_hash: bodyHashOf(f, f.leafBId), body_md: bodyB },
+        { node_id: f.topicId, expected_body_hash: bodyHashOf(f, f.topicId), body_md: `Sessions.[^${f.claimBId}]` },
       ],
     });
 
@@ -254,11 +258,12 @@ describe('NodeService.synthesizeBatch — per-node outcomes (04 §3, Phase 1 sem
     const f = setup();
     const batch = {
       nodes: [
-        { node_id: f.leafAId, body_md: `Rotation.[^${f.claimAId}]` },
-        { node_id: f.leafBId, body_md: `Storage.[^${f.claimBId}]` },
+        { node_id: f.leafAId, expected_body_hash: bodyHashOf(f, f.leafAId), body_md: `Rotation.[^${f.claimAId}]` },
+        { node_id: f.leafBId, expected_body_hash: bodyHashOf(f, f.leafBId), body_md: `Storage.[^${f.claimBId}]` },
       ],
     };
     f.nodes.synthesizeBatch(batch);
+    for (const entry of batch.nodes) entry.expected_body_hash = bodyHashOf(f, entry.node_id);
     const changelogBefore = f.repos.changelog.recent(1000).length;
     const updatedBefore = f.repos.nodes.getById(f.leafAId)!.updatedAt;
 
@@ -273,7 +278,7 @@ describe('NodeService.synthesizeBatch — per-node outcomes (04 §3, Phase 1 sem
   it('every write lands inside the batch transaction (locked-architecture: one BEGIN IMMEDIATE)', () => {
     const f = setup();
     const bodyB = `Storage.[^${f.claimBId}]`;
-    f.nodes.synthesize({ node_id: f.leafBId, body_md: bodyB });
+    f.nodes.synthesize({ node_id: f.leafBId, expected_body_hash: bodyHashOf(f, f.leafBId), body_md: bodyB });
     f.repos.nodes.markStaleWithAncestors(f.leafBId, '2026-07-24T00:03:00.000Z');
 
     // Both write kinds — an `updated` body write and a `stale-cleared` clear — must be
@@ -292,8 +297,8 @@ describe('NodeService.synthesizeBatch — per-node outcomes (04 §3, Phase 1 sem
 
     f.nodes.synthesizeBatch({
       nodes: [
-        { node_id: f.leafAId, body_md: `Rotation.[^${f.claimAId}]` },
-        { node_id: f.leafBId, body_md: bodyB },
+        { node_id: f.leafAId, expected_body_hash: bodyHashOf(f, f.leafAId), body_md: `Rotation.[^${f.claimAId}]` },
+        { node_id: f.leafBId, expected_body_hash: bodyHashOf(f, f.leafBId), body_md: bodyB },
       ],
     });
 
@@ -307,11 +312,12 @@ describe('NodeService.synthesizeBatch — per-node outcomes (04 §3, Phase 1 sem
     const f = setup();
     const batch = {
       nodes: [
-        { node_id: f.leafAId, body_md: `Rotation.[^${f.claimAId}]` },
-        { node_id: f.leafBId, body_md: `Storage.[^${f.claimBId}]` },
+        { node_id: f.leafAId, expected_body_hash: bodyHashOf(f, f.leafAId), body_md: `Rotation.[^${f.claimAId}]` },
+        { node_id: f.leafBId, expected_body_hash: bodyHashOf(f, f.leafBId), body_md: `Storage.[^${f.claimBId}]` },
       ],
     };
     f.nodes.synthesizeBatch(batch);
+    for (const entry of batch.nodes) entry.expected_body_hash = bodyHashOf(f, entry.node_id);
 
     const realTx = f.repos.tx.bind(f.repos);
     const tx = vi.spyOn(f.repos, 'tx').mockImplementation(realTx);
@@ -326,13 +332,19 @@ describe('NodeService.synthesizeBatch — per-node outcomes (04 §3, Phase 1 sem
     const batched = setup();
     const bodyFor = (f: Fixture): string => `Rotation.[^${f.claimAId}]`;
 
-    const one = single.nodes.synthesize({ node_id: single.leafAId, body_md: bodyFor(single) });
+    const one = single.nodes.synthesize({ node_id: single.leafAId, expected_body_hash: bodyHashOf(single, single.leafAId), body_md: bodyFor(single) });
     const many = batched.nodes.synthesizeBatch({
-      nodes: [{ node_id: batched.leafAId, body_md: bodyFor(batched) }],
+      nodes: [{ node_id: batched.leafAId, expected_body_hash: bodyHashOf(batched, batched.leafAId), body_md: bodyFor(batched) }],
     });
 
     expect(many.nodes).toEqual([
-      { inputIndex: 0, nodeId: batched.leafAId, depth: 2, outcome: one.outcome },
+      {
+        inputIndex: 0,
+        nodeId: batched.leafAId,
+        depth: 2,
+        outcome: one.outcome,
+        bodyDelta: one.bodyDelta,
+      },
     ]);
     expect(many.staleNodes).toEqual(one.staleNodes);
   });

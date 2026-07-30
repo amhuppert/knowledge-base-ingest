@@ -160,7 +160,13 @@ export function errorToIssues(err: unknown): Issue[] {
 
 /** Merge root warnings ahead of an envelope's issues and re-derive ok/errors/warnings. */
 function withRootIssues(env: Envelope<unknown>, rootIssues: Issue[]): Envelope<unknown> {
-  return result(env.data, [...rootIssues, ...env.issues], { nextActions: env.nextActions, hints: env.hints });
+  return result(env.data, [...rootIssues, ...env.issues], {
+    nextActions: env.nextActions,
+    ...(env.instruction === undefined
+      ? {}
+      : { instruction: env.instruction }),
+    hints: env.hints,
+  });
 }
 
 /** Emit an envelope and return its exit code (0 ran-ok · 1 ran-and-failed). */
@@ -199,11 +205,34 @@ function runDryRun(ws: Workspace, handler: (ws: Workspace) => Envelope<unknown>,
   // quote error caught for recovery steering). Its writes were rolled back, so it must
   // NOT steer to the replay action — keep the handler's own recovery steering (03 §2).
   if (!raw.ok) {
-    return result(raw.data, raw.issues, { nextActions: raw.nextActions, hints: raw.hints });
+    return result(raw.data, raw.issues, {
+      nextActions: raw.nextActions,
+      ...(raw.instruction === undefined
+        ? {}
+        : { instruction: raw.instruction }),
+      hints: raw.hints,
+    });
   }
+  const receiptClaims =
+    raw.data !== null &&
+    typeof raw.data === 'object' &&
+    Array.isArray((raw.data as { claims?: unknown }).claims)
+      ? ((raw.data as { claims: unknown[] }).claims)
+      : [];
+  const hasReviewCandidates = receiptClaims.some((row) => {
+    if (row === null || typeof row !== 'object') return false;
+    const matched = (row as {
+      reviewCandidates?: { matched?: unknown };
+    }).reviewCandidates?.matched;
+    return typeof matched === 'number' && matched > 0;
+  });
   const steering = steeringFor(
     plan.command,
-    { ok: true, dryRun: { command: plan.reapplyCommand, payloadFrom: plan.payloadFrom } },
+    {
+      ok: true,
+      dryRun: { command: plan.reapplyCommand, payloadFrom: plan.payloadFrom },
+      hasReviewCandidates,
+    },
     plan.registry,
   );
   const data =

@@ -69,6 +69,17 @@ describe('envelope v2 constructors', () => {
     expect(success({}, { nextActions: na, hints: ['tip'] }).nextActions).toEqual(na);
     expect(result(null, [err('x')], { hints: ['tip'] }).hints).toEqual(['tip']);
   });
+
+  it('carries instruction only when explicitly set', () => {
+    const absent = success({});
+    expect('instruction' in absent).toBe(false);
+
+    const present = success({}, { instruction: 'Review this before continuing.' });
+    expect(present.instruction).toBe('Review this before continuing.');
+    expect(JSON.parse(JSON.stringify(present)).instruction).toBe(
+      'Review this before continuing.',
+    );
+  });
 });
 
 describe('emit', () => {
@@ -97,5 +108,28 @@ describe('emit', () => {
     expect(stdout).toContain('next:');
     expect(stdout).toContain('kb verify --json');
     expect(stdout).toContain('tip: a tip');
+  });
+
+  it('renders one instruction line after diagnostics and before hints', () => {
+    const events: string[] = [];
+    const out: OutputStreams = {
+      stdout: (chunk) => events.push(`stdout:${chunk.trim()}`),
+      stderr: (chunk) => events.push(`stderr:${chunk.trim()}`),
+    };
+    emit(
+      result({}, [warn('careful')], {
+        instruction: 'Review candidates.',
+        hints: ['a tip'],
+      }),
+      false,
+      out,
+    );
+
+    expect(events.findIndex((event) => event.includes('[X_WARN] careful'))).toBeLessThan(
+      events.findIndex((event) => event === 'stdout:instruction: Review candidates.'),
+    );
+    expect(
+      events.findIndex((event) => event === 'stdout:instruction: Review candidates.'),
+    ).toBeLessThan(events.findIndex((event) => event === 'stdout:tip: a tip'));
   });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { openDb } from '../../db/connection.js';
 import { migrate } from '../../db/migrate.js';
 import { Repositories } from '../../db/repositories/index.js';
@@ -126,6 +126,7 @@ describe('ClaimService', () => {
     expect(res.totals.spansCreated).toBe(1);
     expect(res.spansCreatedNet).toBe(1);
     const claim = repos.claims.listByNode(leafId)[0]!;
+    expect(repos.claims.listFirstSeenBySource(sourceId).map((candidate) => candidate.id)).toEqual([claim.id]);
     expect(repos.claimSpans.spansForClaim(claim.id)[0]?.quote).toBe('rotates refresh tokens on every use');
     expect(repos.nodes.getById(leafId)?.isStale).toBe(true);
     expect(repos.nodes.getById(rootId)?.isStale).toBe(true);
@@ -273,10 +274,45 @@ describe('NodeService.synthesize', () => {
     return { ctx, repos, rootId: root.id, leafId: leaf.id, claimId: claim.id };
   }
 
+  it('rechecks expected_body_hash inside the transaction when another apply wins after validation', () => {
+    const { ctx, repos, leafId } = setupWithClaim();
+    const beforeHash = repos.nodes.getById(leafId)!.bodyHash;
+    const first = {
+      node_id: leafId,
+      body_md: 'First writer.',
+      expected_body_hash: beforeHash,
+    };
+    const second = {
+      node_id: leafId,
+      body_md: 'Second writer.',
+      expected_body_hash: beforeHash,
+    };
+    const realTx = repos.tx.bind(repos);
+    vi.spyOn(repos, 'tx')
+      .mockImplementationOnce((fn) => {
+        new NodeService(ctx).synthesize(first);
+        return realTx(fn);
+      })
+      .mockImplementation(realTx);
+
+    let thrown: unknown;
+    try {
+      new NodeService(ctx).synthesize(second);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(DomainIssuesError);
+    expect((thrown as DomainIssuesError).issues).toEqual([
+      expect.objectContaining({ code: 'BODY_HASH_MISMATCH' }),
+    ]);
+    expect(repos.nodes.getById(leafId)!.bodyMd).toBe('First writer.');
+  });
+
   it('clears stale on the synthesized leaf but leaves the still-stale root', () => {
     const { ctx, repos, rootId, leafId, claimId } = setupWithClaim();
     new NodeService(ctx).synthesize({
       node_id: leafId,
+      expected_body_hash: '',
       body_md: `Refresh tokens rotate on every use.[^${claimId}]`,
     });
     expect(repos.nodes.getById(leafId)?.isStale).toBe(false);
@@ -288,6 +324,7 @@ describe('NodeService.synthesize', () => {
     expect(() =>
       new NodeService(ctx).synthesize({
         node_id: leafId,
+        expected_body_hash: '',
         body_md: 'Bogus.[^clm_deadbeefdeadbeef]',
       }),
     ).toThrow(/unknown claim/);
@@ -303,7 +340,7 @@ describe('NodeService.synthesize', () => {
   function baseline() {
     const { ctx, repos, rootId, leafId, claimId } = setupWithClaim();
     const B0 = `Rotate baseline.[^${claimId}]`;
-    new NodeService(ctx).synthesize({ node_id: leafId, body_md: B0 }); // leaf fresh, title='Token Rotation', summary=''
+    new NodeService(ctx).synthesize({ node_id: leafId, expected_body_hash: '', body_md: B0 }); // leaf fresh, title='Token Rotation', summary=''
     repos.nodes.setStale(rootId, false, '2000-01-01T00:00:00.000Z'); // root fresh baseline
     return { ctx, repos, rootId, leafId, claimId, B0 };
   }
@@ -347,6 +384,7 @@ describe('NodeService.synthesize', () => {
 
     const payload: Synthesize = {
       node_id: leafId,
+      expected_body_hash: before.bodyHash,
       body_md: row.body === 'diff' ? B1 : B0,
       ...(row.title !== undefined ? { title: row.title } : {}),
       ...(row.summary !== undefined ? { summary: row.summary } : {}),
@@ -390,7 +428,7 @@ describe('NodeService.synthesize', () => {
 
     let thrown: unknown;
     try {
-      new NodeService(ctx).synthesize({ node_id: leafId, body_md: `Rotate.[^${claimId}]` });
+      new NodeService(ctx).synthesize({ node_id: leafId, expected_body_hash: before.bodyHash, body_md: `Rotate.[^${claimId}]` });
     } catch (e) {
       thrown = e;
     }
@@ -426,7 +464,7 @@ describe('NodeService.synthesize', () => {
 
     let thrown: unknown;
     try {
-      new NodeService(ctx).synthesize({ node_id: target.id, body_md: `Cross-cite.[^${siblingClaimId}]` });
+      new NodeService(ctx).synthesize({ node_id: target.id, expected_body_hash: before.bodyHash, body_md: `Cross-cite.[^${siblingClaimId}]` });
     } catch (e) {
       thrown = e;
     }

@@ -25,6 +25,8 @@ import { registerNode } from './commands/node.js';
 import { registerClaim } from './commands/claim.js';
 import { registerGraph } from './commands/graph.js';
 import { registerEntity } from './commands/entity.js';
+import { registerRelationship } from './commands/relationship.js';
+import { registerVocabulary } from './commands/vocabulary.js';
 
 export interface BuiltProgram {
   program: Command;
@@ -66,6 +68,8 @@ export function buildProgram(io: CliIo, json: boolean): BuiltProgram {
   registerClaim(group(program, 'claim', 'Persist and manage claims.'), ctx);
   registerGraph(group(program, 'graph', 'Persist the knowledge graph.'), ctx);
   registerEntity(group(program, 'entity', 'Inspect graph entities.'), ctx);
+  registerRelationship(group(program, 'relationship', 'Inspect graph relationships.'), ctx);
+  registerVocabulary(group(program, 'vocabulary', 'Discover claim, span, and graph vocabularies.'), ctx);
 
   // Populate the registry now that every command is registered, so steering can drop any
   // hint/next-action naming a command this phase has not shipped (01 §6.1).

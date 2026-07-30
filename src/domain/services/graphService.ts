@@ -4,7 +4,8 @@ import type { EntityId, RelationshipId, SpanId } from '../ids.js';
 import { normalizeEntityName } from '../algorithms/normalize.js';
 import { deriveEntityId, deriveRelationshipId } from '../algorithms/idDeriver.js';
 import { resolveSpanCandidate, persistSpan, spanIdFor, spanRangeKey, type SpanCandidate } from './spanResolver.js';
-import { DomainIssueError } from '../issueCodes.js';
+import { DomainIssueError, type DomainIssue } from '../issueCodes.js';
+import { ENTITY_TYPES, RELATIONSHIP_TYPES } from '../schemas/enums.js';
 
 export type GraphOutcome = 'created' | 'updated' | 'unchanged';
 
@@ -91,8 +92,121 @@ interface EvidenceBatchState {
   links: Set<string>;
 }
 
+interface GraphApplyOptions {
+  /** Receives non-blocking type diagnostics computed against the pre-apply KB state. */
+  onDiagnostics?: (issues: readonly DomainIssue[]) => void;
+}
+
+interface EstablishedType {
+  type: string;
+  count: number;
+  recommendedOrder: number;
+}
+
+function normalizedGraphType(type: string): string {
+  return type.toLowerCase().replace(/[_ -]/g, '');
+}
+
 export class GraphService {
   constructor(private readonly ctx: ServiceContext) {}
+
+  /**
+   * Diagnose payload types against recommended vocabulary plus types already stored in
+   * this KB. Diagnostics are advisory: neither a warning nor info issue blocks writes.
+   */
+  private typeDiagnostics(payload: GraphApply): DomainIssue[] {
+    const repos = this.ctx.repos;
+    const established = (
+      recommended: readonly string[],
+      observedTypes: readonly string[],
+    ): EstablishedType[] => {
+      const counts = new Map<string, number>();
+      for (const type of observedTypes) counts.set(type, (counts.get(type) ?? 0) + 1);
+      const recommendationOrder = new Map(recommended.map((type, index) => [type, index]));
+      const types = new Set<string>([...recommended, ...counts.keys()]);
+      return [...types]
+        .map((type) => ({
+          type,
+          count: counts.get(type) ?? 0,
+          recommendedOrder: recommendationOrder.get(type) ?? Number.MAX_SAFE_INTEGER,
+        }))
+        .sort(
+          (a, b) =>
+            b.count - a.count ||
+            a.recommendedOrder - b.recommendedOrder ||
+            a.type.localeCompare(b.type),
+        );
+    };
+
+    const entityTypes = established(ENTITY_TYPES, repos.entities.listAll().map((entity) => entity.type));
+    const relationshipTypes = established(
+      RELATIONSHIP_TYPES,
+      repos.relationships.listAll().map((relationship) => relationship.type),
+    );
+    const candidates: Array<{
+      kind: 'entity' | 'relationship';
+      type: string;
+      path: string;
+      established: EstablishedType[];
+    }> = [
+      ...payload.entities.map((entity, index) => ({
+        kind: 'entity' as const,
+        type: entity.type,
+        path: `entities[${index}].type`,
+        established: entityTypes,
+      })),
+      ...payload.relationships.flatMap((relationship, index) => [
+        {
+          kind: 'relationship' as const,
+          type: relationship.type,
+          path: `relationships[${index}].type`,
+          established: relationshipTypes,
+        },
+        {
+          kind: 'entity' as const,
+          type: relationship.subject.type,
+          path: `relationships[${index}].subject.type`,
+          established: entityTypes,
+        },
+        {
+          kind: 'entity' as const,
+          type: relationship.object.type,
+          path: `relationships[${index}].object.type`,
+          established: entityTypes,
+        },
+      ]),
+    ];
+
+    const seen = new Set<string>();
+    return candidates.flatMap<DomainIssue>(({ kind, type, path, established: known }): DomainIssue[] => {
+      const key = `${kind}\0${type}`;
+      if (seen.has(key)) return [];
+      seen.add(key);
+      if (known.some((entry) => entry.type === type)) return [];
+
+      const normalized = normalizedGraphType(type);
+      const nearMiss = known.find((entry) => normalizedGraphType(entry.type) === normalized);
+      if (nearMiss) {
+        return [{
+          code: 'GRAPH_TYPE_NEAR_MISS',
+          severity: 'warning',
+          message: `${kind} type "${type}" is a near miss for established type "${nearMiss.type}".`,
+          path,
+        }];
+      }
+
+      const examples = known
+        .slice(0, 5)
+        .map((entry) => `${entry.type} (${entry.count})`)
+        .join(', ');
+      return [{
+        code: 'GRAPH_TYPE_NEW',
+        severity: 'info',
+        message: `New ${kind} type "${type}". Established ${kind} types with counts: ${examples}.`,
+        path,
+      }];
+    });
+  }
 
   /**
    * Persist agent-extracted entities and relationships with quote-verified provenance,
@@ -101,7 +215,7 @@ export class GraphService {
    * relationship counts as `updated`; an exact repeat writes NOTHING (no rows, no
    * changelog). The changelog is appended iff `created + updated > 0`.
    */
-  apply(payload: GraphApply): GraphApplyReceipt {
+  apply(payload: GraphApply, options: GraphApplyOptions = {}): GraphApplyReceipt {
     const repos = this.ctx.repos;
     const now = this.ctx.now();
     const source = repos.sources.getById(payload.source_id);
@@ -112,6 +226,8 @@ export class GraphService {
     if (!sourceText) {
       throw new DomainIssueError('UNKNOWN_SOURCE', `no canonical text for source ${payload.source_id}`, { path: 'source_id', ids: [payload.source_id] });
     }
+
+    options.onDiagnostics?.(this.typeDiagnostics(payload));
 
     return repos.tx(() => {
       const spansBefore = repos.spans.listBySource(payload.source_id).length;

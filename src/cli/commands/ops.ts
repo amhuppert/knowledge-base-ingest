@@ -7,17 +7,25 @@ import { resolve } from 'node:path';
 import type { Command } from 'commander';
 import { success, result, type Issue, type Envelope } from '../output.js';
 import { codeForVerifyCheck, hintFor } from '../issues.js';
-import { bareAction, kbPathSuspectIssue, leaf, workspaceAction, type RunContext } from '../run.js';
+import { bareAction, kbPathSuspectIssue, leaf, optStr, workspaceAction, type RunContext } from '../run.js';
 import { defineHelp } from '../help/spec.js';
 import { steeringFor } from '../steering.js';
 import { initWorkspace, kbRootVia, kbRootWarnings, type Workspace } from '../../kb/workspace.js';
 import { writeScaffold } from '../../kb/scaffold.js';
 import { renderAll, writeRender, checkRender } from '../../render/render.js';
 import { verify } from '../../verify/verify.js';
-import { coverage, type CoverageCode } from '../../coverage/coverage.js';
+import {
+  coverage,
+  coverageForSource,
+  COVERAGE_ID_CAP,
+  type CoverageCode,
+} from '../../coverage/coverage.js';
 import { systemClock } from '../../domain/services/context.js';
 import { currentSchemaVersion, readSchemaVersion } from '../../db/migrate.js';
 import { cliVersion } from '../version.js';
+import { makeSourceId } from '../../domain/ids.js';
+import { DomainIssueError } from '../../domain/issueCodes.js';
+import { CoverageSourceReportSchema } from '../../domain/schemas/readModels.js';
 
 function count(ws: Workspace, table: string): number {
   const r = ws.db.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number };
@@ -27,14 +35,11 @@ function count(ws: Workspace, table: string): number {
 /** Per-check message stems for `kb coverage`; `(<shown> of <total> shown)` is appended. */
 const COVERAGE_MESSAGES: Record<CoverageCode, (n: number) => string> = {
   SOURCE_NO_CLAIMS: (n) => `${n} active source(s) have no claim provenance`,
-  CHUNK_UNCITED: (n) => `${n} chunk(s) are covered by no live claim or relationship span`,
+  CHUNK_UNCITED: (n) => `${n} substantive chunk(s) are covered by no live claim or relationship span`,
   CLAIM_NOT_SYNTHESIZED: (n) => `${n} active claim(s) are cited in no synthesis body`,
   NODE_SINGLE_SOURCE: (n) => `${n} node(s) rely on a single source`,
   OPEN_QUESTION_NOT_SYNTHESIZED: (n) => `${n} open-question claim(s) are surfaced in no node`,
 };
-
-/** The maximum number of ids listed per coverage issue (06 §3; totals stay exact). */
-const COVERAGE_ID_CAP = 20;
 
 export function registerOps(program: Command, ctx: RunContext): void {
   defineHelp(leaf(program, 'init [dir]', 'Create or open a KB root, write scaffold files, and render the initial markdown.'), {
@@ -227,25 +232,91 @@ export function registerOps(program: Command, ctx: RunContext): void {
       }),
     );
 
-  defineHelp(leaf(program, 'coverage', 'Report synthesis completeness gaps across sources, chunks, claims, and nodes.'), {
-    command: 'coverage',
-    group: 'maintain',
-    usage: 'kb coverage',
-    summary: 'Report synthesis completeness gaps across sources, chunks, claims, and nodes.',
-    args: [],
-    flags: [],
-    output: [
-      'summary: per-check { total, shown } for SOURCE_NO_CLAIMS, CHUNK_UNCITED, CLAIM_NOT_SYNTHESIZED, NODE_SINGLE_SOURCE, OPEN_QUESTION_NOT_SYNTHESIZED',
-      'issues: one aggregated info issue per non-empty check (ids capped at 20; exact totals in summary)',
-    ],
-    sideEffects: [],
-    atomic: false,
-    supportsDryRun: false,
-    workflow: 'Survey synthesis completeness after verify; descriptive, never an integrity gate.',
-    related: ['verify', 'render'],
-    examples: [{ description: 'Report coverage', command: 'kb coverage --json' }],
-  }).action(
-    workspaceAction(ctx, (ws): Envelope<unknown> => {
+  defineHelp(
+    leaf(
+      program,
+      'coverage',
+      'Report synthesis completeness gaps across sources, chunks, claims, and nodes. --source matches any live evidence span contributed by that source, not the source that first created the claim.',
+    ).option('--source <source_id>', 'scope coverage to contributions evidenced by one source'),
+    {
+      command: 'coverage',
+      group: 'maintain',
+      usage: 'kb coverage [--source <source_id>]',
+      summary:
+        'Report synthesis completeness gaps across sources, chunks, claims, and nodes. --source matches any live evidence span contributed by that source, not the source that first created the claim.',
+      args: [],
+      flags: [
+        {
+          flags: '--source <source_id>',
+          description: 'scope coverage to contributions evidenced by one source',
+        },
+      ],
+      output: [
+        'corpus data: summary per check plus structuralChunks { total, shown, ids } inventory',
+        'scoped data (CoverageSourceReportSchema): scope, chunks, claims by status, relationships by status, candidate review inventory with exact total and capped claim ids only, and four source-applicable findings with zeros present',
+        'issues: one aggregated info issue per non-empty actionable check (ids capped at 20; exact totals in data)',
+      ],
+      sideEffects: [],
+      atomic: false,
+      supportsDryRun: false,
+      workflow:
+        'Survey synthesis completeness after verify; descriptive, never an integrity gate. NODE_SINGLE_SOURCE is corpus-only because a new-topic source legitimately creates single-source nodes. Valid empty scoped results are success; unknown sources are structured errors.',
+      related: ['verify', 'render', 'source list', 'relationship list', 'claim candidates', 'source impact'],
+      examples: [
+        { description: 'Report corpus coverage', command: 'kb coverage --json' },
+        {
+          description: 'Scope to a source that added evidence to existing claims',
+          command: 'kb coverage --source src_1a2b3c --json',
+        },
+      ],
+    },
+  ).action(
+    workspaceAction(ctx, (ws, { opts }): Envelope<unknown> => {
+      const sourceOption = optStr(opts, 'source');
+      if (sourceOption !== undefined) {
+        const sourceId = makeSourceId(sourceOption);
+        const source = ws.repos.sources.getById(sourceId);
+        if (!source) {
+          throw new DomainIssueError('UNKNOWN_SOURCE', `unknown source ${sourceOption}`, {
+            ids: [sourceOption],
+            hint: 'List sources: kb source list --json',
+          });
+        }
+
+        // Parse in the production handler so drift in the computed read model becomes a
+        // structured schema failure instead of silently escaping through the envelope.
+        const scoped = CoverageSourceReportSchema.parse(coverageForSource(ws.repos, sourceId));
+        const issues: Issue[] = [];
+        if (source.status !== 'active') {
+          issues.push({
+            code: 'PROVENANCE_SOURCE_INACTIVE',
+            severity: 'info',
+            message: `Source ${source.id} has status ${source.status}; scoped coverage remains available.`,
+            ids: [source.id],
+          });
+        }
+        for (const finding of scoped.findings) {
+          if (finding.total === 0) continue;
+          issues.push({
+            code: finding.code,
+            severity: 'info',
+            message: `${COVERAGE_MESSAGES[finding.code](finding.total)} (${finding.shown} of ${finding.total} shown)`,
+            ids: finding.ids,
+            hint: hintFor(finding.code),
+          });
+        }
+        const steering = steeringFor(
+          'coverage',
+          { ok: true, scopedSourceId: sourceId },
+          ctx.registry,
+        );
+        return success(scoped, {
+          issues,
+          nextActions: steering.nextActions,
+          hints: steering.hints,
+        });
+      }
+
       // One aggregated INFO issue per non-empty check, ids capped but totals exact
       // (no-silent-truncation). `data.summary` always carries all five checks. Coverage
       // is descriptive: info severity never fails the run, so `ok` stays true / exit 0.
@@ -266,7 +337,7 @@ export function registerOps(program: Command, ctx: RunContext): void {
         });
       }
       return success(
-        { summary },
+        { summary, structuralChunks: report.structuralChunks },
         { issues, hints: ['Coverage is descriptive; kb verify --strict --json remains the integrity gate.'] },
       );
     }),

@@ -271,7 +271,7 @@ describe('ClaimService.apply — receipts (03 §3.1)', () => {
     };
     new ClaimService(ctx).apply(payload);
     // Clear the leaf's staleness so a leaked stale write on the exact repeat would show.
-    new NodeService(ctx).synthesize({ node_id: leafId, body_md: `Rotation.[^${repos.claims.listByNode(leafId)[0]!.id}]` });
+    new NodeService(ctx).synthesize({ node_id: leafId, expected_body_hash: '', body_md: `Rotation.[^${repos.claims.listByNode(leafId)[0]!.id}]` });
     const changelogBefore = counts(repos).changelog;
     const leafStaleBefore = repos.nodes.getById(leafId)!.isStale;
     const rootStaleBefore = repos.nodes.getById(rootId)!.isStale;

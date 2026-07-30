@@ -147,4 +147,66 @@ describe('skill drift guard (07 §4)', () => {
   it('kb-query names the provenance payload key (data.provenance, not data.spans)', () => {
     expect(skillText('kb-query')).toContain('data.provenance');
   });
+
+  it('kb-ingest finishes with the exact source-scoped QA and integrity sequence', () => {
+    const finish = skillText('kb-ingest').match(
+      /### 10\. finish([\s\S]*?)## Judgment/,
+    )?.[1];
+    expect(finish).toBeDefined();
+    const commands = fencedLines(finish ?? '').filter((line) =>
+      line.startsWith('kb '),
+    );
+    expect(commands).toEqual([
+      'kb claim candidates --source <source_id> --json',
+      'kb coverage --source <source_id> --json',
+      'kb relationship list --source <source_id> --json',
+      'kb verify --strict --json',
+      'kb render --json',
+      'kb render --check --json',
+    ]);
+    expect(finish).toContain('instruction is binding when it fires');
+    expect(finish).toContain('Optional backlog context: `kb coverage --json`');
+  });
+
+  it('kb-ingest states the candidate adjudication judgment without treating candidates as contradictions', () => {
+    const text = skillText('kb-ingest');
+    expect(text).toContain(
+      'Adjudicate each candidate with `kb claim supersede`, `kb claim conflict`, or a consciously recorded coexistence; candidates are not contradictions.',
+    );
+  });
+
+  it('kb-ingest preserves cross-subtree open-question resolution guidance', () => {
+    expect(skillText('kb-ingest')).toContain(
+      'Resolve an open question by superseding it with the resolving claim (kb claim supersede <question_id> --by <decision_id>) - this works across subtrees; never delete the question. The resolution renders with full provenance in kb/open-questions.md.',
+    );
+  });
+
+  it('kb-ingest documents evidence membership and structural chunks', () => {
+    const text = skillText('kb-ingest');
+    expect(text).toContain(
+      'Source membership means contributed evidence through any live span, not first-seen provenance.',
+    );
+    expect(text).toContain(
+      'Chunks whose `contentKind` is `structural` are headings only and need no claim extraction.',
+    );
+  });
+
+  it('kb-ingest discovers graph vocabulary and gives honest type-diagnostic guidance', () => {
+    const text = skillText('kb-ingest');
+    expect(text).toContain(
+      '`kb vocabulary list --json` enumerates recommended and observed entity and relationship types.',
+    );
+    expect(text).toContain(
+      'Treat a `GRAPH_TYPE_NEAR_MISS` warning as a payload typo to fix before applying; a deliberate new type is legal.',
+    );
+  });
+
+  it('kb-create runs the same scoped coverage and relationship review pair per source', () => {
+    expect(skillText('kb-create')).toContain(
+      [
+        'kb coverage --source <source_id> --json',
+        'kb relationship list --source <source_id> --json',
+      ].join('\n'),
+    );
+  });
 });

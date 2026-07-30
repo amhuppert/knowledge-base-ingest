@@ -39,6 +39,8 @@ render.** You add knowledge ONLY through `kb` commands — never by editing file
   you are running.
 - `--dry-run` exists on exactly five commands: `ingest`, `node apply`, `claim apply`,
   `graph apply`, `synthesize`. No other command accepts it.
+- Source membership means contributed evidence through any live span, not first-seen provenance.
+- Chunks whose `contentKind` is `structural` are headings only and need no claim extraction.
 
 ## Stages
 
@@ -53,7 +55,7 @@ preflight → discover → preview → apply → resume → finish
 | preview | Dry-run every authored payload; branch on the issue `code` | `--dry-run` on the five commands above |
 | apply | Apply the **unchanged** validated payload; consume the receipt | `… --json` |
 | resume | Restart from state, not from step 1 | `kb status --json`, `kb node tree --json` (stale flags), receipts' `nextActions` |
-| finish | Explicit terminal condition | `kb verify --strict --json` → `kb render --json` → `kb render --check --json`; then review `kb coverage --json` |
+| finish | Review this source, then run the terminal gates | `kb claim candidates --source <source_id> --json` (its instruction is binding when it fires) → `kb coverage --source <source_id> --json` (fix or explicitly accept every actionable finding) → `kb relationship list --source <source_id> --json` (review the exact graph contribution) → `kb verify --strict --json` → `kb render --json` → `kb render --check --json` |
 
 ## Recovery by issue code
 
@@ -178,8 +180,9 @@ bytes is a no-op. Note the returned `sourceId`; the receipt also reports `origin
 kb source chunks <source_id> --json
 ```
 
-Each chunk has an `id`, a `headingPath`, and its exact `text`. Copy quotes from that
-`text` — character for character, from a single chunk, unique within it.
+Each chunk has an `id`, a `headingPath`, a `contentKind`, and its exact `text`. Copy
+quotes from that `text` — character for character, from a single chunk, unique within
+it. A `structural` chunk is heading-only inventory; do not extract claims from it.
 
 ### 5. Place the claims
 
@@ -205,10 +208,10 @@ Both are atomic: if one quote fails verification, nothing persists — fix that 
 re-run. The claim receipt gives you one entry per input (`inputIndex`, `claimId`,
 `outcome`, span counts) plus `totals` and `staleNodes`; an exact repeat reports
 `unchanged` and writes nothing at all, so a replay is safe. For the graph, prefer the
-recommended vocabulary (entities: Service, DataStore, Library, Concept, Pattern,
-Decision, Config…; relationships: depends_on, stores_in, implements, supersedes,
-configured_by, part_of…), and never strip version numbers from names ("React 18" ≠
-"React").
+recommended vocabulary. `kb vocabulary list --json` enumerates recommended and observed entity and relationship types.
+Treat a `GRAPH_TYPE_NEAR_MISS` warning as a payload typo to fix before applying; a deliberate new type is legal.
+Never strip version numbers from
+names ("React 18" ≠ "React").
 
 ### 7. Conflicts and supersession
 
@@ -221,6 +224,8 @@ When the new source contradicts what is already in the KB:
    `kb claim conflict <claim_id_a> <claim_id_b> --json`.
 5. If the source itself states an unresolved question, model it as a claim of type
    `open_question` instead.
+
+Resolve an open question by superseding it with the resolving claim (kb claim supersede <question_id> --by <decision_id>) - this works across subtrees; never delete the question. The resolution renders with full provenance in kb/open-questions.md.
 
 Both commands stale the affected nodes; follow the receipt's `nextActions` back into
 synthesis. Conflicted and open-question claims surface in `kb/open-questions.md`.
@@ -237,11 +242,14 @@ kb synthesize --file ./batch.json --json
 
 `--context` returns everything one synthesize write needs — the node, its children with
 their citable claims, the whole subtree's claims with provenance snippets, the
-contributing sources, and `allowedCitationIds`. Put an inline `[^clm_…]` citation after
-every assertion, citing only ids from that list. Never write footnote definitions or
-child links; the renderer generates both. `synthesize` takes a batch of node payloads
-applied deepest-first in one transaction — use it, and loop until the receipt's
-`staleNodes` is empty.
+contributing sources, and `allowedCitationIds`. Every node payload requires
+`expected_body_hash`, copied from that node's `bodyHash` in the `--context` read. Put an
+inline `[^clm_…]` citation after every assertion, citing only ids from that list. Never
+write footnote definitions or child links; the renderer generates both. `synthesize`
+takes a batch of node payloads applied deepest-first in one transaction — use it, and
+loop until the receipt's `staleNodes` is empty. A `BODY_HASH_MISMATCH` means the node
+changed after you read it: re-run `kb node show <node_id> --context --json`, then
+re-author that node's payload from the new context.
 
 ### 9. resume
 
@@ -257,19 +265,32 @@ kb verify --json          # what is failing right now
 ### 10. finish
 
 ```
-kb verify --strict --json      # must be ok:true
+kb claim candidates --source <source_id> --json
+kb coverage --source <source_id> --json
+kb relationship list --source <source_id> --json
+kb verify --strict --json
 kb render --json
-kb render --check --json       # must report no drift
-kb coverage --json             # review; action or consciously accept each finding
+kb render --check --json
 ```
 
+The candidate command's instruction is binding when it fires: complete its review
+before continuing. Fix every actionable scoped-coverage finding, or explicitly accept
+it with a reason, before continuing. Review the relationship list as the exact graph
+contribution from this source. `verify --strict` must be `ok:true`, and
+`render --check` must report no drift.
+
+Optional backlog context: `kb coverage --json`. Corpus coverage is descriptive and is
+not the verdict on whether this source is complete.
+
 Then report: the source added (id, title, chunk count), claims/entities/relationships
-created, conflicts recorded, nodes re-synthesized, the `verify` result, and any coverage
-finding you chose to accept and why.
+created, conflicts recorded, nodes re-synthesized, the scoped coverage summary (including
+accepted findings and reasons), the relationship review result, and the `verify` and
+render-check results.
 
 ## Judgment (the part the CLI cannot do)
 
 - **Claim atomicity.** One assertion per claim, so each can be superseded on its own.
+- **Candidate adjudication.** Adjudicate each candidate with `kb claim supersede`, `kb claim conflict`, or a consciously recorded coexistence; candidates are not contradictions.
 - **Supersession vs. conflict.** A newer source restating an old fact with a new value is
   a supersession. Two sources that disagree with no clear winner are a conflict — record
   both; never average them.

@@ -43,10 +43,10 @@ export interface SteeringState {
   newSourceId?: string;
   /** Claims left anchored ONLY to the superseded source after a `--supersedes` ingest (Phase 5 §1.4). */
   strandedClaimCount?: number;
-  /** Source id in scope (claim apply failure → reread its chunks). */
+  /** Source id in scope (claim apply failure → reread chunks; graph apply → review relationships). */
   sourceId?: string;
-  /** First entity id (graph apply). */
-  firstEntityId?: string;
+  /** Source id when the just-run coverage command was source-scoped. */
+  scopedSourceId?: string;
   /** Whether the KB already has sources (node create / node apply gating). */
   hasSources?: boolean;
   /** A claim-apply failure caused by quote issues. */
@@ -64,6 +64,8 @@ export interface SteeringState {
     /** Where the previewed payload came from. */
     payloadFrom: 'file' | 'stdin';
   };
+  /** A claim-apply preview found at least one advisory candidate to adjudicate. */
+  hasReviewCandidates?: boolean;
 }
 
 /** Resolved (registry-filtered) steering. */
@@ -193,6 +195,24 @@ export const STEERING_TABLE: SteeringRow[] = [
       ],
     }),
   },
+  {
+    // The compact impact index exposes affected nodes deepest-first. When one is
+    // stale, point at exactly the first node's drill-down; a fully fresh impact
+    // remains quiet.
+    command: 'source impact',
+    when: (s) =>
+      isOk(s) &&
+      s.sourceId !== undefined &&
+      (s.staleIds?.length ?? 0) > 0,
+    build: (s, r) => ({
+      nextActions: [],
+      hints: hintIf(
+        r,
+        'source impact',
+        `kb source impact ${s.sourceId!} --node ${s.staleIds![0]!} --json`,
+      ),
+    }),
+  },
   // node create, no sources yet → guidance hint (no embedded command).
   {
     command: 'node create',
@@ -274,17 +294,26 @@ export const STEERING_TABLE: SteeringRow[] = [
     }),
   },
   {
-    // graph apply never stales nodes → no stale chain (finding 15). `entity list` is
-    // offered alongside `entity show` so the agent can enumerate rather than guess at
-    // ids (eval run 1, finding 3); each hint drops out if its command is unregistered.
+    // graph apply never stales nodes → no stale chain (finding 15). Review the exact
+    // relationship contribution from the payload's source; the hint is withheld until
+    // `relationship list` is registered.
     command: 'graph apply',
     when: isOk,
     build: (s, r) => ({
       nextActions: [],
-      hints: [
-        ...(s.firstEntityId ? hintIf(r, 'entity show', `kb entity show ${s.firstEntityId} --json`) : []),
-        ...hintIf(r, 'entity list', 'Survey the graph: kb entity list --json'),
-      ],
+      hints: s.sourceId
+        ? hintIf(r, 'relationship list', `kb relationship list --source ${s.sourceId} --json`)
+        : [],
+    }),
+  },
+  {
+    // Only source-scoped coverage has a single source contribution to review. Corpus
+    // coverage stays quiet, and relationship list deliberately has no back-pointer.
+    command: 'coverage',
+    when: (s) => isOk(s) && s.scopedSourceId !== undefined,
+    build: (s, r) => ({
+      nextActions: [],
+      hints: hintIf(r, 'relationship list', `kb relationship list --source ${s.scopedSourceId!} --json`),
     }),
   },
   {
@@ -349,21 +378,36 @@ const DRY_RUN_COMMANDS = ['claim apply', 'graph apply', 'synthesize', 'node appl
  * being steered. file → re-run the same command verbatim (dropping if that command
  * is not yet shipped); stdin → the non-replayable hint.
  */
-export const DRY_RUN_TABLE: SteeringRow[] = DRY_RUN_COMMANDS.flatMap((command): SteeringRow[] => [
+export const DRY_RUN_TABLE: SteeringRow[] = [
+  ...DRY_RUN_COMMANDS.flatMap((command): SteeringRow[] => [
+    {
+      command,
+      when: (s) => isOk(s) && s.dryRun?.payloadFrom === 'file',
+      build: (s, r) => ({ nextActions: actionIf(r, command, 'Apply the previewed change', s.dryRun!.command), hints: [] }),
+    },
+    {
+      command,
+      when: (s) => isOk(s) && s.dryRun?.payloadFrom === 'stdin',
+      build: () => ({
+        nextActions: [],
+        hints: ['Re-run without --dry-run using the same payload file; stdin payloads cannot be replayed automatically.'],
+      }),
+    },
+  ]),
   {
-    command,
-    when: (s) => isOk(s) && s.dryRun?.payloadFrom === 'file',
-    build: (s, r) => ({ nextActions: actionIf(r, command, 'Apply the previewed change', s.dryRun!.command), hints: [] }),
-  },
-  {
-    command,
-    when: (s) => isOk(s) && s.dryRun?.payloadFrom === 'stdin',
-    build: () => ({
+    command: 'claim apply',
+    when: (s) => isOk(s) && s.dryRun !== undefined && s.hasReviewCandidates === true,
+    build: (_s, r) => ({
       nextActions: [],
-      hints: ['Re-run without --dry-run using the same payload file; stdin payloads cannot be replayed automatically.'],
+      hints:
+        r.has('claim supersede') && r.has('claim conflict')
+          ? [
+              'Review candidates via kb claim supersede / kb claim conflict, or accept coexistence.',
+            ]
+          : [],
     }),
   },
-]);
+];
 
 /**
  * The steering rows that fire for `command` given `state` — the SINGLE selection

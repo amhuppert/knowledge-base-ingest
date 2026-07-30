@@ -1,5 +1,5 @@
 /**
- * SOURCE group: list, show, chunks.
+ * SOURCE group: list, show, chunks, impact.
  */
 
 import type { Command } from 'commander';
@@ -7,9 +7,14 @@ import { success, result } from '../output.js';
 import { choiceOption, leaf, optStr, unknownIdIssue, workspaceAction, type RunContext } from '../run.js';
 import { defineHelp } from '../help/spec.js';
 import { steeringFor } from '../steering.js';
-import { makeSourceId } from '../../domain/ids.js';
+import { makeNodeId, makeSourceId } from '../../domain/ids.js';
 import { SOURCE_STATUSES, type SourceStatus } from '../../domain/schemas/enums.js';
 import { parseSourceMetadata } from '../../domain/schemas/sourceMetadata.js';
+import { classifyChunkText } from '../../domain/algorithms/chunkKind.js';
+import {
+  buildSourceImpact,
+  buildSourceImpactNode,
+} from '../../domain/services/sourceImpact.js';
 
 /**
  * The origin a source row surfaces (06 §2): `system` + `url` from `metadata.origin`,
@@ -46,7 +51,7 @@ export function registerSource(group: Command, ctx: RunContext): void {
       atomic: false,
       supportsDryRun: false,
       workflow: 'Survey ingested sources and their extraction coverage.',
-      related: ['source show', 'source chunks'],
+      related: ['source show', 'source chunks', 'coverage'],
       examples: [
         { description: 'List all sources', command: 'kb source list --json' },
         { description: 'List only active sources', command: 'kb source list --status active --json' },
@@ -120,12 +125,16 @@ export function registerSource(group: Command, ctx: RunContext): void {
       summary: 'List chunks with ids, heading paths, and exact text for quote selection.',
       args: [{ name: 'source_id', description: 'the source id (src_…) whose chunks to list' }],
       flags: [],
-      output: ['sourceId', 'chunks: [{ id, chunkIndex, headingPath, text }] — copy quotes verbatim from text'],
+      output: [
+        'sourceId',
+        'chunks: [{ id, chunkIndex, headingPath, text, contentKind }] — copy quotes verbatim from text',
+        "chunks with contentKind 'structural' (heading-only) need no claim extraction",
+      ],
       sideEffects: [],
       atomic: false,
       supportsDryRun: false,
       workflow: 'Read chunk text to copy exact quotes into a claim/graph payload.',
-      related: ['source show', 'claim apply'],
+      related: ['source show', 'claim apply', 'relationship list'],
       examples: [{ description: 'List a source’s chunks', command: 'kb source chunks src_1a2b3c --json' }],
     },
   ).action(
@@ -136,8 +145,127 @@ export function registerSource(group: Command, ctx: RunContext): void {
         chunkIndex: c.chunkIndex,
         headingPath: c.headingPath,
         text: c.text,
+        contentKind: classifyChunkText(c.text),
       }));
       return success({ sourceId: id, chunks });
+    }),
+  );
+
+  defineHelp(
+    leaf(
+      group,
+      'impact <source_id>',
+      'Summarize what one source contributed, then optionally return one affected node’s synthesis working set.',
+    ).option('--node <node_id>', 'return the source-scoped working set for one node'),
+    {
+      command: 'source impact',
+      group: 'ingest',
+      usage: 'kb source impact <source_id> [--node <node_id>]',
+      summary:
+        'Summarize what one source contributed, then optionally return one affected node’s synthesis working set.',
+      args: [
+        {
+          name: 'source_id',
+          description:
+            'the source id (src_…) whose evidence-linked contribution to inspect',
+        },
+      ],
+      flags: [
+        {
+          flags: '--node <node_id>',
+          description: 'return the source-scoped working set for one node',
+        },
+      ],
+      output: [
+        'default: source metadata; introduced vs evidencedExisting claims and relationships with status totals and lexicographic ids capped at 20; affected nodes ordered by (depth DESC, sortOrder, nodeId); scoped coverage totals; complete candidate claim ids in lexicographic order',
+        'the default is summaries and stable ids only — never claim or relationship bodies, quotes, provenance, or candidate bodies',
+        '--node: node { id, title, bodyMd, bodyHash }; source-contributed subtree claims ordered by claimId with status and candidates; lexicographic node-context allowedCitationIds; children with ownClaimCount ordered by (sortOrder, nodeId)',
+        'a valid node outside this source’s affected owner/ancestor set still returns successfully with one SOURCE_NO_CLAIMS info issue scoped to that node subtree',
+      ],
+      sideEffects: [],
+      atomic: false,
+      supportsDryRun: false,
+      workflow:
+        'Inspect a compact source contribution first, then select a stale affected node for a synthesis-ready drill-down.',
+      related: [
+        'coverage',
+        'relationship list',
+        'claim candidates',
+        'node show',
+      ],
+      examples: [
+        {
+          description: 'Summarize one source contribution',
+          command: 'kb source impact src_1a2b3c --json',
+        },
+        {
+          description: 'Read one affected node’s source-scoped working set',
+          command:
+            'kb source impact src_1a2b3c --node nod_1a2b3c --json',
+        },
+      ],
+    },
+  ).action(
+    workspaceAction(ctx, (ws, { args, opts }) => {
+      const sourceOption = args[0] as string;
+      const sourceId = makeSourceId(sourceOption);
+      if (!ws.repos.sources.getById(sourceId)) {
+        return result(null, [
+          {
+            ...unknownIdIssue(
+              'UNKNOWN_SOURCE',
+              `unknown source ${sourceOption}`,
+              sourceOption,
+            ),
+            hint: 'List sources: kb source list --json',
+          },
+        ]);
+      }
+
+      const nodeOption = optStr(opts, 'node');
+      if (nodeOption === undefined) {
+        const data = buildSourceImpact(ws.repos, sourceId);
+        const firstStale = data.affectedNodes.find((node) => node.stale);
+        const steering = steeringFor(
+          'source impact',
+          {
+            ok: true,
+            sourceId,
+            staleIds: firstStale ? [firstStale.nodeId] : [],
+          },
+          ctx.registry,
+        );
+        return success(data, {
+          nextActions: steering.nextActions,
+          hints: steering.hints,
+        });
+      }
+
+      const nodeId = makeNodeId(nodeOption);
+      const drillDown = buildSourceImpactNode(ws.repos, sourceId, nodeId);
+      if (!drillDown) {
+        return result(null, [
+          unknownIdIssue(
+            'UNKNOWN_NODE',
+            `unknown node ${nodeOption}`,
+            nodeOption,
+          ),
+        ]);
+      }
+      return success(drillDown.data, {
+        ...(drillDown.affected
+          ? {}
+          : {
+              issues: [
+                {
+                  code: 'SOURCE_NO_CLAIMS',
+                  severity: 'info' as const,
+                  message: `Source ${sourceId} does not contribute claims to node ${nodeId} or its subtree.`,
+                  ids: [sourceId, nodeId],
+                },
+              ],
+            }),
+      });
     }),
   );
 }
